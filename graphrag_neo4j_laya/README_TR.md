@@ -446,6 +446,35 @@ print(f"Jev:  {result['jev']['score']:.3f}  @ {result['jev']['latency_ms']:.0f}m
 print(f"Δ:    {result['delta']:.4f}")
 ```
 
+#### 6. Agregasyon soruları (deneysel rehberli sorgu planlayıcı)
+
+"Kaç tane", "en çok hangisi" ya da "hepsini listele" gibi sorularda sayımı LLM değil veritabanı yapmalıdır. Rehberli sorgu planlayıcı tipli bir sorgu planını adım adım kurar: yasal hamleleri kod üretir (mevcut sınırda gerçekten var olan ilişki tipleri ve yönler, beyaz listedeki alanlar ve operatörler), Laya yalnızca bunlar arasından seçer. Plan parametreli Kùzu Cypher'a çevrilir, bir kez `Noul` ile soruya karşı kontrol edilir ve çalıştırılır. Ayrıntılar ve ölçümler: [AGGREGATION_METHODS.md](AGGREGATION_METHODS.md), Yöntem 6.
+
+Yalnız Kùzu'da çalışır ve `DECISION_MODEL_BACKEND=ablation` ile kullanılamaz. Router rotası **varsayılan olarak kapalıdır**:
+
+```bash
+# .env
+AGGREGATE_ROUTE_ENABLED=true      # router'a `aggregate` niyetini sun
+AGGREGATE_ANSWER_MODE=template    # 'template' (LLM yok, varsayılan) ya da 'llm' (fact + citation kontrolü)
+RELATION_SCHEMA_PATH=examples/data/science_history.json   # planlayıcı için ilişki açıklamaları
+```
+
+Bayrak kapalıyken planlayıcıyı doğrudan çağırın. Router'ı atlar; planı, Cypher'ı, satırları ve adım izini döndürür. Hiçbir plan kabul edilmezse `None` döner:
+
+```python
+result = pipeline.query_aggregate("How many places was Isaac Newton born in?")
+if result:
+    print(result.description)   # planın düz İngilizce açıklaması
+    print(result.cypher, result.params)
+    print(result.answer)        # şablon cevap
+```
+
+Planlayıcıyı etiketli soru setiyle (`examples/data/aggregate_eval.json`, 33 soru) gerçek Laya modeliyle ölçün:
+
+```bash
+python -m graphrag.benchmarks.aggregate_planner_eval   # tabloyu yazdırır, benchmarks/results/aggregate_planner_eval.json dosyasına yazar
+```
+
 ### Laya neyi yargılayabilir, neyi yargılayamaz
 
 Laya bir System One karar modelidir. **Ona verdiğiniz durumu** yargılar; kendine ait bir dünya bilgisi yoktur. Pratikte bunun anlamı:

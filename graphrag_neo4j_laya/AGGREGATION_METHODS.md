@@ -1,13 +1,14 @@
 # Agregasyon Soruları İçin Çözüm Yöntemleri
 
-> Tarih: 2026-09-25 · Durum: karar dokümanı (henüz implementasyon yok)
+> Tarih: 2026-09-25 · Durum: karar dokümanı. Yöntem 6 implement edildi ve ölçüldü; router rotası kapalı (bkz. bölüm 7).
 
-Pipeline şu an "kaç tane", "en çok", "hepsini listele" gibi agregasyon sorularına güvenilir cevap veremiyor. Bu doküman beş çözüm yöntemini örneklerle anlatıyor ve aralarında seçim yapmayı kolaylaştırıyor. Yöntem 5, üç dış Jev projesinin incelenmesinden çıktı (bkz. dokümanın sonundaki Ek).
+Pipeline şu an "kaç tane", "en çok", "hepsini listele" gibi agregasyon sorularına güvenilir cevap veremiyor. Bu doküman altı çözüm yöntemini örneklerle anlatıyor ve aralarında seçim yapmayı kolaylaştırıyor. Yöntem 5, üç dış Jev projesinin incelenmesinden çıktı (bkz. dokümanın sonundaki Ek).
 
-Beş yöntem birbirinin alternatifi değil:
+Yöntemler birbirinin alternatifi değil:
 
 - **1, 2 ve 3 aynı zincirin halkalarıdır.** Tek başına hiçbiri işe yaramaz. Asıl seçim, zincirin ne kadarını kuracağımız.
 - **4 başka bir soru tipini çözer:** tematik ve genel sorular. Kesin sayım yapmaz.
+- **6, 1–3'ün şablonlarının yerine geçer:** sorguyu graph üzerinde adım adım kurar ve çok adımlı yol filtrelerini de ifade eder. Yöntem 3 ve 5'i içinde kullanır.
 - **5, şablonların ifade edemediği filtreleri çözer:** "kaç teori var", "hangileri fizikle ilgili". Yöntem 2'nin üstüne eklenen bir ara adımdır; sonucu güven aralığıyla verir.
 
 Tüm örnekler quickstart verisini kullanıyor: `examples/data/science_history.json`, 14 varlık ve 14 triple. Bunlardan 2 triple kasıtlı olarak yanlış ve edge verification sırasında budanıyor ("Newton baked Banana Bread", "LIGO was born in Ulm"). Sayımlar kalan 12 kenara göre verildi.
@@ -668,7 +669,89 @@ Tüm düğümleri taramak ölçeklenmez. Büyük graph'ta adaylar önce daraltı
 
 ---
 
-## 7. Karşılaştırma
+## 7. Yöntem 6: Rehberli sorgu planlayıcı
+
+> Durum: implement edildi (`graphrag/retrieval/planner/`), router rotası `AGGREGATE_ROUTE_ENABLED` bayrağıyla **kapalı**. Plan: `docs/plans/2026-09-25-001-feat-guided-query-planner-plan.md`.
+
+### Ne yapar
+
+Yöntem 1–3'teki sabit şablonlar yerine sorguyu **adım adım** kurar. Her adımda yasal hamleleri kod üretir, Laya yalnızca aralarından seçer:
+
+1. İşlem (`Choice`): `count`, `list`, `rank`, `group`.
+2. Başlangıç (`Choice`): seed varlık mı, bütün graph mı. Seed yoksa "bütün graph" zorunludur.
+3. Hop döngüsü (`Choice`, en fazla `aggregate_max_hops=3`): seçenekler o anki sınırdan (frontier) **gerçekten çıkan** ilişki tipi × yön çiftleri, bir yönde birden fazla tip varsa `any:<yön>`, ve `stop`. Graph'ta olmayan bir ilişki ya da yön seçilemez.
+4. Filtreler: iki ve daha fazla hop'ta başlangıç varlığını hariç tutma (`Noul`); soruda sayı varsa sayısal filtre (alan, operatör ve değer; değer sorudan regex ile çıkar).
+5. Şekil (`group` / `rank`): gruplama anahtarları tek `ask_batch` çağrısıyla, metrik `Choice` ile; `rank` için `limit` sorudaki sayıdan; soruda sayı varsa `HAVING`.
+6. Anlamsal filtre (`Choice`, kapalı liste): `none`, `person`, `theory`, `place`, `work`, `organisation`, `phenomenon`. Seçilirse Yöntem 5 çalışır: adaylar DB'den gelir, her biri `Noul` ile bantlanır (≥ 0,70 kesin, ≤ 0,30 hayır) ve kesin küme `IN` filtresi olarak plana eklenir. Sonuç `[kesin, kesin + belirsiz]` aralığıdır.
+
+Sonra plan (tipli bir AST, `plan.py`) parametreli Kùzu Cypher'a çevrilir. Tanımlayıcılar beyaz listeden gelir, bütün değerler parametredir. Planın İngilizce açıklaması soruya karşı bir kez `Noul` ile kontrol edilir ("Bu sorgu soruyu cevaplıyor mu?"). Kontrol geçmezse en küçük marjlı adım ikinci seçenekle değiştirilip plan bir kez daha kurulur. Plan güveni en zayıf adımın olasılığıdır. Güven düşükse ya da kontrol geçmezse `None` döner ve pipeline eski rotalara düşer.
+
+Bu, Pangu'nun (Gu ve ark., 2023) "üretme, ayırt et" ilkesidir: model sorgu yazmaz, kodun sıraladığı adaylar arasından seçer.
+
+### Örnek
+
+"How many places was Isaac Newton born in?" için beklenen plan ve üretilen sorgu:
+
+```text
+count · start = Isaac Newton · hops = [BORN_IN:out]
+MATCH (v0:Entity)-[e0:RELATES_TO]->(v1:Entity) WHERE v0.name = $p1 AND e0.type = $p0
+RETURN count(DISTINCT v1.name) AS count_distinct_v1_name LIMIT $limit
+→ 2 (Calculus, Woolsthorpe; aligner hatası nedeniyle Calculus da BORN_IN)
+```
+
+Yöntem 1–5'in yapamadığı çok adımlı yol filtreleri de bu yolla ifade edilebilir: "Einstein'ın keşfettiği teori nelere bağlı?" → `list · start = Albert Einstein · hops = [DISCOVERED:out, any:out] · v2.name != Albert Einstein`.
+
+### Ölçüm (gerçek Laya)
+
+Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `examples/data/aggregate_eval.json`, 33 soru: 10 basit, 6 gruplu / filtreli, 4 iki hop'lu, 3 anlamsal filtreli agregasyon, ve 10 agregasyon olmayan soru; 13'ü Türkçe. Seed'ler setten gelir, yani seed seçim hataları sayılara karışmaz. Laya `multilingual` checkpoint, CPU, 2026-09-25.
+
+| Ölçüm | Sonuç | Bayrak hedefi |
+| --- | --- | --- |
+| İşlem doğruluğu | %73,9 | |
+| Başlangıç doğruluğu | %39,1 | |
+| Hop tipi / yön / durma | %17,4 / %8,7 / %26,1 | yön ≥ %90 |
+| Filtre / anahtar / metrik / `HAVING` | %82,6 / %78,3 / %69,6 / %91,3 | |
+| Anlamsal filtre adımı | %82,6 (3 anlamsal sorunun 1'i doğru, 2 soruda gereksiz filtre) | |
+| Tam plan eşleşmesi | %0 (0 / 23) | |
+| Sonuç eşleşmesi | %8,7 (2 / 23, ikisi de yanlış planla tesadüfen) | ≥ %80 |
+| Agregasyon sorusunu `aggregate`'e yönlendirme | %39,1 | |
+| Yanlış yönlendirme (agregasyon olmayan → `aggregate`) | %10 (1 / 10) | %0 |
+| Geri çeviri kontrolü: doğru planı geçirme / yanlış planı reddetme | %47,8 / %65,2 | |
+| Min ve çarpım güveninin ayırma gücü | ölçülemedi (hiç doğru plan yok) | |
+| Dil kırılımı (sonuç eşleşmesi) | en %7,1 · tr %11,1 | |
+| Gecikme (ortalama) | yönlendirme 0,9 sn · plan 3,8 sn | |
+| Soru başına çağrı | 4,0 `Choice` · 1,5 `Noul` · 0,1 `ask_batch` | |
+
+Üç bayrak hedefinin üçü de tutmadı. Router rotası kapalı kalır.
+
+### Bulgular
+
+- **Asıl kırılma başlangıç adımında.** Seed'i olan 16 sorunun hiçbirinde Laya seed'i seçmedi. "How many places was Isaac Newton born in?" için P(bütün graph) = 0,995. İki farklı ifadeyle denendi (kısa `Choice`, "soru X'i adıyla anıyor mu?" `Noul`'u); seed hatırlama 8 soruda 0–2'de kaldı. Başlangıç yanlış olunca sonraki bütün hop'lar da yanlış oluyor.
+- **Hop seçimi yazı-tura düzeyinde.** Örnek: `BORN_IN:out` 0,36, `BORN_IN:in` 0,34. `stop` genellikle erken değil geç seçiliyor; bir soruda 3 hop'luk anlamsız bir yol kuruldu.
+- **Geri çeviri kontrolü zayıf bir ayırıcı.** Doğru planların yarısını reddediyor, yanlışların üçte birini geçiriyor. Onarım adımı bu yüzden az işe yarıyor.
+- **İşlem, filtre ve `HAVING` adımları görece iyi**, ama bu adımların çoğu soruda "yok" cevabı bekleniyor; yüksek oran kısmen bundan geliyor.
+- **Mimari beklendiği gibi çalışıyor:** bütün geçersiz hamleler yapısal olarak engelleniyor, üretilen her plan geçerli Cypher'a dönüşüyor, boş ve kesilmiş sonuçlar doğru raporlanıyor (187 birim testi).
+
+### Sonraki denemeler (ölçülmedi)
+
+- Başlangıç adımını koda almak: seed'in adı soruda geçiyorsa `anchor`. Tek başına başlangıç doğruluğunu ve dolayısıyla hop adımlarını etkiler.
+- Hop adımında `Choice` yerine seçenek başına `Noul` sormak ve ilişki açıklamasını yönle birlikte cümle olarak vermek.
+- Aynı düzenekle Jev backend'ini ölçmek (`DECISION_MODEL_BACKEND=jev`).
+
+### Kod
+
+| Dosya | İçerik |
+| --- | --- |
+| `graphrag/graph/kuzu_client.py` | `frontier_moves`, `distinct_values`, salt okunur `run_read_query` |
+| `graphrag/retrieval/planner/plan.py`, `render_kuzu.py`, `describe.py` | Tipli plan, Kùzu renderer, İngilizce açıklama |
+| `graphrag/retrieval/planner/candidates.py`, `planner.py` | Aday üretimi ve adım adım planlayıcı |
+| `graphrag/retrieval/planner/executor.py`, `facts.py`, `semantic_filter.py` | Kontrol, onarım, çalıştırma, fact ve şablon cevap, anlamsal filtre |
+| `graphrag/retrieval/router.py`, `graphrag/pipeline.py` | `aggregate` niyeti (bayraklı), `pipeline.query_aggregate()` |
+| `graphrag/benchmarks/aggregate_planner_eval.py` | Ölçüm düzeneği |
+
+---
+
+## 8. Karşılaştırma
 
 ### Yöntemler arası bağımlılık
 
@@ -679,23 +762,27 @@ flowchart LR
     M2 --> M5[Yöntem 5<br/>Aday + Noul + kodda sayım]
     M5 --> M3
     M4[Yöntem 4<br/>Community özetleri]
+    M6[Yöntem 6<br/>Rehberli planlayıcı] --> M3
+    M6 --> M5
 ```
 
-1 → 2 → 3 tek bir özelliktir; biri çıkarılırsa zincir kopar. Ancak 2 + 3, Yöntem 1 olmadan da denenebilir: `pipeline.query_aggregate(spec)` gibi açık bir API ile router'ı atlayarak. Yöntem 5, Yöntem 2'nin aday listesini filtreleyen bir ara adımdır ve sonucunu Yöntem 3'e verir. Yöntem 4 bağımsızdır.
+1 → 2 → 3 tek bir özelliktir; biri çıkarılırsa zincir kopar. Ancak 2 + 3, Yöntem 1 olmadan da denenebilir: `pipeline.query_aggregate(spec)` gibi açık bir API ile router'ı atlayarak. Yöntem 5, Yöntem 2'nin aday listesini filtreleyen bir ara adımdır ve sonucunu Yöntem 3'e verir. Yöntem 4 bağımsızdır. Yöntem 6, 1 + 2'nin yerine geçer; sonucunu Yöntem 3'e verir ve tür filtreleri için Yöntem 5'i çağırır.
 
 ### Tablo
 
-| Kriter | 1: Router | 2: DB şablonları | 3: Fact + citation | 4: Community özetleri | 5: Aday + Noul |
-| --- | --- | --- | --- | --- | --- |
-| Çözdüğü soru | Yönlendirme | Kesin sayım, liste, sıralama | Doğal dil cevap + doğrulama | Tematik, genel sorular | Anlamsal filtreli sayım |
-| Sonuç doğruluğu | Laya'ya bağlı (ölçülmedi) | Tam (graph kadar) | 2'nin doğruluğunu korur | Yaklaşık | Sınıflandırıcı kadar; aralıkla raporlanır |
-| Tek başına değer | Yok | Sınırlı (API ile) | Yok | Var | Sınırlı (2'nin aday listesiyle güçlenir) |
-| Tahmini kod | ~40 satır | ~60 satır × 4 backend | ~30 satır | ~200+ satır | ~60 satır + `list_entities()` |
-| Çalışma maliyeti | 1 + 3 `Choice` | 1 DB sorgusu | 0–1 LLM + N `Noul` | Ingestion: topluluk başına LLM; sorgu: N `Score` + 1 LLM | Aday başına 1–2 `Noul` (~33 ms) |
-| Ana risk | Yanlış yönlendirme, eski rotaları bozma | Dar kalıp seti | Dil kısıtı | Maliyet, bayatlama | Ölçek, biriken sınıflandırma hatası |
-| Veri değişikliği gerekir mi | Hayır | Tür soruları için evet (`entity_type`) | Hayır | Evet (Community düğümleri) | Hayır |
+| Kriter | 1: Router | 2: DB şablonları | 3: Fact + citation | 4: Community özetleri | 5: Aday + Noul | 6: Planlayıcı |
+| --- | --- | --- | --- | --- | --- | --- |
+| Çözdüğü soru | Yönlendirme | Kesin sayım, liste, sıralama | Doğal dil cevap + doğrulama | Tematik, genel sorular | Anlamsal filtreli sayım | Count, list, rank, group; çok hop'lu yollar |
+| Sonuç doğruluğu | Laya'ya bağlı (ölçülmedi) | Tam (graph kadar) | 2'nin doğruluğunu korur | Yaklaşık | Sınıflandırıcı kadar; aralıkla raporlanır | Plan doğruysa tam; ölçülen sonuç eşleşmesi %8,7 |
+| Tek başına değer | Yok | Sınırlı (API ile) | Yok | Var | Sınırlı (2'nin aday listesiyle güçlenir) | Var (`query_aggregate` API) |
+| Tahmini kod | ~40 satır | ~60 satır × 4 backend | ~30 satır | ~200+ satır | ~60 satır + `list_entities()` | ~1.100 satır (gerçekleşen) |
+| Çalışma maliyeti | 1 + 3 `Choice` | 1 DB sorgusu | 0–1 LLM + N `Noul` | Ingestion: topluluk başına LLM; sorgu: N `Score` + 1 LLM | Aday başına 1–2 `Noul` (~33 ms) | ~4 `Choice` + ~1,5 `Noul`, CPU'da ~3,8 sn |
+| Ana risk | Yanlış yönlendirme, eski rotaları bozma | Dar kalıp seti | Dil kısıtı | Maliyet, bayatlama | Ölçek, biriken sınıflandırma hatası | Laya'nın adım isabeti (ölçüldü, düşük) |
+| Veri değişikliği gerekir mi | Hayır | Tür soruları için evet (`entity_type`) | Hayır | Evet (Community düğümleri) | Hayır | Hayır |
 
 ### İşlem bazında yapılabilirlik
+
+Sütun 6, Yöntem 6'nın plan dilinin **ifade edebildiğini** gösterir; Laya ile ölçülen isabet bölüm 7'dedir. Sayısal aralık `~`: tek karşılaştırma var, iki uçlu aralık yok. `IN` `~`: yalnız anlamsal filtrenin kesin kümesi olarak. Anlamsal yüklem `~`: yalnız kapalı tür listesi.
 
 Kısaltmalar: **✓** mevcut tasarımla yapılabilir · **G** yapılabilir, ama önerilen genişletme gerekir (`group_edges`, `AggregateSpec.keys/metrics/filters`) · **~** yaklaşık · **✗** yapılamaz.
 
@@ -703,46 +790,47 @@ Mevcut şema: `Entity(name, description, pagerank, communityId)`, `RELATES_TO(ty
 
 #### Agregasyon işlemleri
 
-| İşlem | Örnek soru | 1 | 2 | 3 | 4 | 5 | Yapılması için gereken |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `COUNT` (tek anchor × ilişki) | Calculus'u kaç kişi geliştirdi? | ✓ | ✓ | ✓ | ~ | — | Mevcut tasarım yeterli |
-| Tam liste | Newton hangi eserleri yazdı? | ✓ | ✓ | ✓ | ✗ | — | `limit` aşılırsa `truncated` bilgisi |
-| Çıkış derecesine göre top-k | En çok bağlantısı olan varlık? | ✓ | ✓ | ✓ | ✗ | — | Mevcut `top_by_degree` |
-| Giriş derecesine göre top-k | En çok atıf alan varlık? | G | G | ✓ | ✗ | — | `group_edges(["target"], [count])` |
-| `COUNT DISTINCT` | Newton kaç farklı yere bağlı? | G | G | ✓ | ✗ | — | `count_distinct` metriği; Kùzu'da sona alınmalı |
-| `SUM` / `AVG` / `MIN` / `MAX` | İlişki tipine göre ortalama hedef pagerank? | G | G | G | ✗ | — | `group_edges` metrikleri; Yöntem 3'te tablo fact + şablon modu |
-| Tek seviyeli `GROUP BY` | İlişki tipine göre kenar sayısı? | G | G | G | ✗ | — | `group_edges(["relation"], ...)` |
-| Çok seviyeli `GROUP BY` | Community × Subject × Relation tablosu | G | G | G | ✗ | — | `group_edges` + Yöntem 3'te satır başına fact. Router yerine `query_aggregate` API'si önerilir |
-| Roll-up | Aynı tablo, özne seviyesinde | G | G | G | ✗ | — | `keys` listesinden bir seviye çıkarmak |
-| `HAVING` (grup sonrası filtre) | Birden fazla doğum yeri olan kişi? | G | G | G | ✗ | — | `group_edges(having=...)`, Cypher'da `WITH ... WHERE` |
-| Kenar destek skoru metrikleri | Kanıtı en zayıf ilişki grubu? | ✗ | ✗ | ✗ | ✗ | ✗ | **Veri:** `RELATES_TO.support DOUBLE` kolonu ve `upsert_edge`'in Laya skorunu yazması |
-| Tematik özet | Kütleçekimiyle ilgili ana fikirler? | ✓ | ✗ | ✗ | ✓ | ✗ | Yöntem 4 (community özetleri) |
+| İşlem | Örnek soru | 1 | 2 | 3 | 4 | 5 | 6 | Yapılması için gereken |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `COUNT` (tek anchor × ilişki) | Calculus'u kaç kişi geliştirdi? | ✓ | ✓ | ✓ | ~ | — | ✓ | Mevcut tasarım yeterli |
+| Tam liste | Newton hangi eserleri yazdı? | ✓ | ✓ | ✓ | ✗ | — | ✓ | `limit` aşılırsa `truncated` bilgisi |
+| Çıkış derecesine göre top-k | En çok bağlantısı olan varlık? | ✓ | ✓ | ✓ | ✗ | — | ✓ | Mevcut `top_by_degree` |
+| Giriş derecesine göre top-k | En çok atıf alan varlık? | G | G | ✓ | ✗ | — | ✓ | `group_edges(["target"], [count])` |
+| `COUNT DISTINCT` | Newton kaç farklı yere bağlı? | G | G | ✓ | ✗ | — | ✓ | `count_distinct` metriği; Kùzu'da sona alınmalı |
+| `SUM` / `AVG` / `MIN` / `MAX` | İlişki tipine göre ortalama hedef pagerank? | G | G | G | ✗ | — | ✓ | `group_edges` metrikleri; Yöntem 3'te tablo fact + şablon modu |
+| Tek seviyeli `GROUP BY` | İlişki tipine göre kenar sayısı? | G | G | G | ✗ | — | ✓ | `group_edges(["relation"], ...)` |
+| Çok seviyeli `GROUP BY` | Community × Subject × Relation tablosu | G | G | G | ✗ | — | ✓ | `group_edges` + Yöntem 3'te satır başına fact. Router yerine `query_aggregate` API'si önerilir |
+| Roll-up | Aynı tablo, özne seviyesinde | G | G | G | ✗ | — | ✓ | `keys` listesinden bir seviye çıkarmak |
+| `HAVING` (grup sonrası filtre) | Birden fazla doğum yeri olan kişi? | G | G | G | ✗ | — | ✓ | `group_edges(having=...)`, Cypher'da `WITH ... WHERE` |
+| Kenar destek skoru metrikleri | Kanıtı en zayıf ilişki grubu? | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | **Veri:** `RELATES_TO.support DOUBLE` kolonu ve `upsert_edge`'in Laya skorunu yazması |
+| Tematik özet | Kütleçekimiyle ilgili ana fikirler? | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | Yöntem 4 (community özetleri) |
 
 #### Filtre işlemleri
 
-| Filtre türü | Örnek | 1 | 2 | 3 | 4 | 5 | Yapılması için gereken |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Yapısal: anchor + ilişki + yön | Calculus'u geliştirenler | ✓ | ✓ | ✓ | ✗ | — | Mevcut tasarım yeterli |
-| Property eşitliği | Topluluk 0'daki özneler | G | G | ✓ | ✗ | — | `Filter("community", "=", 0)`; değer koddan gelir |
-| Sayısal aralık | Pagerank'ı 0.1'den büyük hedefler | G | G | ✓ | ✗ | — | `Filter("target_pagerank", ">", 0.1)`; sayı sorudan regex ile çıkarılır, Laya'ya ürettirilmez |
-| Çoklu değer (`IN`) | Newton veya Leibniz'in ilişkileri | G | G | ✓ | ✗ | — | `Filter("subject", "in", [...])`; isimler `SeedSelector` ile |
-| Varlık türü | Kaç fizikçi var? | ✓ | ✗ | ✓ | ✗ | ✓ | Sorgu anında Yöntem 5, **veya** ingestion'da `entity_type` + `Filter("type", "=", ...)` |
-| Anlamsal yüklem | Fizikle ilgili varlıklar | ✓ | ✗ | ✓ | ~ | ✓ | Yöntem 5; sonuç aralık olarak raporlanır |
-| Anlamsal filtre + metrik | Teorilerin ilişki tipine göre sayısı | G | G | G | ✗ | ✓ | Yöntem 5 → `Filter("subject", "in", yes)` → `group_edges` |
-| Tarih / zaman | 1900'den sonra yapılan keşifler | ✗ | ✗ | ✗ | ✗ | ~ | **Veri:** kenar veya düğümde tarih property'si. Yöntem 5 açıklamadan tahmin edebilir, ama sonuç güvenilmez |
-| Çok adımlı yol filtresi | Einstein'ın doğduğu şehirde doğan herkes | ✗ | ✗ | ✗ | ✗ | ✗ | Kapsam dışı. Ya 2 ardışık `aggregate_edges` çağrısını bağlayan bir plan adımı, ya da `path_edges` şablonu gerekir |
-| Negatif filtre | Hiçbir şey yazmamış kişiler | ✗ | ✗ | ✗ | ✗ | ~ | `NOT EXISTS` desenli yeni bir şablon; tür bilgisi olmadan "kişi" kümesi Yöntem 5'e bağlı |
+| Filtre türü | Örnek | 1 | 2 | 3 | 4 | 5 | 6 | Yapılması için gereken |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Yapısal: anchor + ilişki + yön | Calculus'u geliştirenler | ✓ | ✓ | ✓ | ✗ | — | ✓ | Mevcut tasarım yeterli |
+| Property eşitliği | Topluluk 0'daki özneler | G | G | ✓ | ✗ | — | ✓ | `Filter("community", "=", 0)`; değer koddan gelir |
+| Sayısal aralık | Pagerank'ı 0.1'den büyük hedefler | G | G | ✓ | ✗ | — | ~ | `Filter("target_pagerank", ">", 0.1)`; sayı sorudan regex ile çıkarılır, Laya'ya ürettirilmez |
+| Çoklu değer (`IN`) | Newton veya Leibniz'in ilişkileri | G | G | ✓ | ✗ | — | ~ | `Filter("subject", "in", [...])`; isimler `SeedSelector` ile |
+| Varlık türü | Kaç fizikçi var? | ✓ | ✗ | ✓ | ✗ | ✓ | ✓ | Sorgu anında Yöntem 5, **veya** ingestion'da `entity_type` + `Filter("type", "=", ...)` |
+| Anlamsal yüklem | Fizikle ilgili varlıklar | ✓ | ✗ | ✓ | ~ | ✓ | ~ | Yöntem 5; sonuç aralık olarak raporlanır |
+| Anlamsal filtre + metrik | Teorilerin ilişki tipine göre sayısı | G | G | G | ✗ | ✓ | ✓ | Yöntem 5 → `Filter("subject", "in", yes)` → `group_edges` |
+| Tarih / zaman | 1900'den sonra yapılan keşifler | ✗ | ✗ | ✗ | ✗ | ~ | ✗ | **Veri:** kenar veya düğümde tarih property'si. Yöntem 5 açıklamadan tahmin edebilir, ama sonuç güvenilmez |
+| Çok adımlı yol filtresi | Einstein'ın doğduğu şehirde doğan herkes | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | Yöntem 6: hop zinciri (`[BORN_IN:in, BORN_IN:out]` gibi) ve başlangıcı hariç tutma filtresi; 1–5 için kapsam dışı |
+| Negatif filtre | Hiçbir şey yazmamış kişiler | ✗ | ✗ | ✗ | ✗ | ~ | ✗ | `NOT EXISTS` desenli yeni bir şablon; tür bilgisi olmadan "kişi" kümesi Yöntem 5'e bağlı |
 
 Özet:
 
 - **Mevcut tasarım** (1 + 2 + 3): yalnızca tek anchor × ilişki × yön filtresiyle `count`, `list` ve çıkış derecesine göre `rank`.
 - **`group_edges` genişletmesiyle** (Yöntem 1, 2, 3'te "G" sütunları): tüm SQL tarzı agregasyonlar ve şemada var olan alanlar üzerindeki yapısal filtreler. Toplam iş, Yöntem 2'nin tahminine ek olarak backend başına ~80 satır ve Yöntem 1'e ~40 satır.
 - **Yöntem 5 ile:** şemada karşılığı olmayan anlamsal ve tür filtreleri. Bu filtreler `group_edges`'e `IN` filtresi olarak bağlanır.
-- **Veri değişikliği olmadan hiçbir yöntemle olmayanlar:** destek skoru metrikleri, tarih filtreleri, çok adımlı yol filtreleri.
+- **Yöntem 6 ile:** yukarıdakilerin hepsi ve çok adımlı yol filtreleri tek bir plan dilinde ifade edilir. Sınır, Laya'nın adımları doğru seçmesidir (bölüm 7).
+- **Veri değişikliği olmadan hiçbir yöntemle olmayanlar:** destek skoru metrikleri, tarih filtreleri.
 
 ---
 
-## 8. Öneri ve doğrulama planı
+## 9. Öneri ve doğrulama planı
 
 ### Öneri
 
