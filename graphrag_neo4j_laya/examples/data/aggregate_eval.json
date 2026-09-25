@@ -1,0 +1,213 @@
+{
+  "description": "Labelled questions for the guided query planner on the science_history graph. `edges` are the verified edges of the quickstart graph (including the aligner's misalignments). Aggregate items carry the expected plan, the expected result rows on that graph and a known-wrong plan variant for the back-translation check. Plan specs: hops are 'TYPE:dir' or 'any:dir'; filters and having are [field-or-metric, op, value]; metrics use the planner's keys ('count', 'count_distinct:v1.name', 'sum:v0.pagerank').",
+  "entities_from": "science_history.json",
+  "edges": [
+    ["Albert Einstein", "BORN_IN", "Ulm"],
+    ["Albert Einstein", "DISCOVERED", "General Relativity"],
+    ["General Relativity", "EXTENDS", "Universal Gravitation"],
+    ["General Relativity", "EXPLAINS", "Spacetime Curvature"],
+    ["General Relativity", "PREDICTED", "Gravitational Waves"],
+    ["Gottfried Leibniz", "DEVELOPED", "Calculus"],
+    ["Isaac Newton", "AUTHORED", "Principia Mathematica"],
+    ["Isaac Newton", "BORN_IN", "Calculus"],
+    ["Isaac Newton", "LEADS", "Royal Society"],
+    ["Isaac Newton", "BORN_IN", "Woolsthorpe"],
+    ["LIGO", "DISCOVERED", "Gravitational Waves"],
+    ["Principia Mathematica", "RELATED_TO", "Universal Gravitation"]
+  ],
+  "items": [
+    {
+      "id": "s01", "lang": "en", "category": "simple", "intent": "aggregate",
+      "question": "How many entities is Isaac Newton directly connected to?",
+      "seeds": ["Isaac Newton"],
+      "expected": [[4]],
+      "plan": {"operation": "count", "start": "Isaac Newton", "hops": ["any:out"]},
+      "wrong_plan": {"operation": "count", "start": "Isaac Newton", "hops": ["any:in"]}
+    },
+    {
+      "id": "s02", "lang": "en", "category": "simple", "intent": "aggregate",
+      "question": "How many places was Isaac Newton born in?",
+      "seeds": ["Isaac Newton"],
+      "expected": [[2]],
+      "plan": {"operation": "count", "start": "Isaac Newton", "hops": ["BORN_IN:out"]},
+      "wrong_plan": {"operation": "count", "start": "Isaac Newton", "hops": ["AUTHORED:out"]}
+    },
+    {
+      "id": "s03", "lang": "tr", "category": "simple", "intent": "aggregate",
+      "question": "Isaac Newton kaç eser yazdı?",
+      "seeds": ["Isaac Newton"],
+      "expected": [[1]],
+      "plan": {"operation": "count", "start": "Isaac Newton", "hops": ["AUTHORED:out"]},
+      "wrong_plan": {"operation": "count", "start": "Isaac Newton", "hops": ["LEADS:out"]}
+    },
+    {
+      "id": "s04", "lang": "en", "category": "simple", "intent": "aggregate",
+      "question": "How many entities are there in the graph?",
+      "seeds": [],
+      "expected": [[14]],
+      "plan": {"operation": "count"},
+      "wrong_plan": {"operation": "count", "hops": ["DISCOVERED:out"]}
+    },
+    {
+      "id": "s05", "lang": "tr", "category": "simple", "intent": "aggregate",
+      "question": "Graph'ta kaç şey keşfedilmiş?",
+      "seeds": [],
+      "expected": [[2]],
+      "plan": {"operation": "count", "hops": ["DISCOVERED:out"]},
+      "wrong_plan": {"operation": "count", "hops": ["DISCOVERED:in"]}
+    },
+    {
+      "id": "s06", "lang": "en", "category": "simple", "intent": "aggregate",
+      "question": "List every work that Isaac Newton authored.",
+      "seeds": ["Isaac Newton"],
+      "expected": [["Principia Mathematica"]],
+      "plan": {"operation": "list", "start": "Isaac Newton", "hops": ["AUTHORED:out"]},
+      "wrong_plan": {"operation": "list", "start": "Isaac Newton", "hops": ["BORN_IN:out"]}
+    },
+    {
+      "id": "s07", "lang": "en", "category": "simple", "intent": "aggregate",
+      "question": "List all entities that discovered Gravitational Waves.",
+      "seeds": ["Gravitational Waves"],
+      "expected": [["LIGO"]],
+      "plan": {"operation": "list", "start": "Gravitational Waves", "hops": ["DISCOVERED:in"]},
+      "wrong_plan": {"operation": "list", "start": "Gravitational Waves", "hops": ["PREDICTED:in"]}
+    },
+    {
+      "id": "s08", "lang": "tr", "category": "simple", "intent": "aggregate",
+      "question": "General Relativity'nin doğrudan bağlı olduğu tüm varlıkları listele.",
+      "seeds": ["General Relativity"],
+      "expected": [["Gravitational Waves"], ["Spacetime Curvature"], ["Universal Gravitation"]],
+      "plan": {"operation": "list", "start": "General Relativity", "hops": ["any:out"]},
+      "wrong_plan": {"operation": "list", "start": "General Relativity", "hops": ["any:in"]}
+    },
+    {
+      "id": "s09", "lang": "en", "category": "simple", "intent": "aggregate",
+      "question": "How many entities point to Gravitational Waves?",
+      "seeds": ["Gravitational Waves"],
+      "expected": [[2]],
+      "plan": {"operation": "count", "start": "Gravitational Waves", "hops": ["any:in"]},
+      "wrong_plan": {"operation": "count", "start": "Gravitational Waves", "hops": ["DISCOVERED:in"]}
+    },
+    {
+      "id": "s10", "lang": "tr", "category": "simple", "intent": "aggregate",
+      "question": "Calculus'a kaç varlık bağlı?",
+      "seeds": ["Calculus"],
+      "expected": [[2]],
+      "plan": {"operation": "count", "start": "Calculus", "hops": ["any:in"]},
+      "wrong_plan": {"operation": "count", "start": "Calculus", "hops": ["DEVELOPED:in"]}
+    },
+    {
+      "id": "g01", "lang": "en", "category": "grouped", "intent": "aggregate",
+      "question": "How many relations of each type does Isaac Newton have?",
+      "seeds": ["Isaac Newton"],
+      "expected": [["AUTHORED", 1], ["BORN_IN", 2], ["LEADS", 1]],
+      "plan": {"operation": "group", "start": "Isaac Newton", "hops": ["any:out"],
+               "keys": ["e0.type"], "metrics": ["count"]},
+      "wrong_plan": {"operation": "group", "start": "Isaac Newton", "hops": ["any:out"],
+                     "keys": ["v1.name"], "metrics": ["count"]}
+    },
+    {
+      "id": "g02", "lang": "en", "category": "grouped", "intent": "aggregate",
+      "question": "How many edges of each relation type are there in the graph?",
+      "seeds": [],
+      "expected": [["AUTHORED", 1], ["BORN_IN", 3], ["DEVELOPED", 1], ["DISCOVERED", 2], ["EXPLAINS", 1], ["EXTENDS", 1], ["LEADS", 1], ["PREDICTED", 1], ["RELATED_TO", 1]],
+      "plan": {"operation": "group", "hops": ["any:out"], "keys": ["e0.type"], "metrics": ["count"]},
+      "wrong_plan": {"operation": "group", "hops": ["any:out"], "keys": ["v0.name"], "metrics": ["count"]}
+    },
+    {
+      "id": "g03", "lang": "tr", "category": "grouped", "intent": "aggregate",
+      "question": "En çok giden ilişkisi olan 2 varlık hangisi?",
+      "seeds": [],
+      "expected": [["Isaac Newton", 4], ["General Relativity", 3]],
+      "plan": {"operation": "rank", "hops": ["any:out"], "keys": ["v0.name"], "metrics": ["count"], "limit": 2},
+      "wrong_plan": {"operation": "rank", "hops": ["any:in"], "keys": ["v0.name"], "metrics": ["count"], "limit": 2}
+    },
+    {
+      "id": "g04", "lang": "en", "category": "grouped", "intent": "aggregate",
+      "question": "Which entities have at least 2 outgoing relations?",
+      "seeds": [],
+      "expected": [["Albert Einstein", 2], ["General Relativity", 3], ["Isaac Newton", 4]],
+      "plan": {"operation": "group", "hops": ["any:out"], "keys": ["v0.name"], "metrics": ["count"],
+               "having": [["count", ">=", 2]]},
+      "wrong_plan": {"operation": "group", "hops": ["any:out"], "keys": ["v0.name"], "metrics": ["count"],
+                     "having": [["count", "<", 2]]}
+    },
+    {
+      "id": "g05", "lang": "tr", "category": "grouped", "intent": "aggregate",
+      "question": "Isaac Newton'un her ilişki türünden kaç farklı hedefi var?",
+      "seeds": ["Isaac Newton"],
+      "expected": [["AUTHORED", 1], ["BORN_IN", 2], ["LEADS", 1]],
+      "plan": {"operation": "group", "start": "Isaac Newton", "hops": ["any:out"],
+               "keys": ["e0.type"], "metrics": ["count_distinct:v1.name"]},
+      "wrong_plan": {"operation": "group", "start": "Isaac Newton", "hops": ["any:in"],
+                     "keys": ["e0.type"], "metrics": ["count_distinct:v1.name"]}
+    },
+    {
+      "id": "g06", "lang": "tr", "category": "grouped", "intent": "aggregate",
+      "question": "Graph'ta 1'den fazla geçen ilişki türleri hangileri?",
+      "seeds": [],
+      "expected": [["BORN_IN", 3], ["DISCOVERED", 2]],
+      "plan": {"operation": "group", "hops": ["any:out"], "keys": ["e0.type"], "metrics": ["count"],
+               "having": [["count", ">", 1]]},
+      "wrong_plan": {"operation": "group", "hops": ["any:out"], "keys": ["e0.type"], "metrics": ["count"],
+                     "having": [["count", "=", 1]]}
+    },
+    {
+      "id": "t01", "lang": "en", "category": "two_hop", "intent": "aggregate",
+      "question": "How many entities are exactly two steps away from Albert Einstein?",
+      "seeds": ["Albert Einstein"],
+      "expected": [[3]],
+      "plan": {"operation": "count", "start": "Albert Einstein", "hops": ["any:out", "any:out"],
+               "filters": [["v2.name", "!=", "Albert Einstein"]]},
+      "wrong_plan": {"operation": "count", "start": "Albert Einstein", "hops": ["any:out"]}
+    },
+    {
+      "id": "t02", "lang": "en", "category": "two_hop", "intent": "aggregate",
+      "question": "List everything that the theory Albert Einstein discovered is connected to.",
+      "seeds": ["Albert Einstein"],
+      "expected": [["Gravitational Waves"], ["Spacetime Curvature"], ["Universal Gravitation"]],
+      "plan": {"operation": "list", "start": "Albert Einstein", "hops": ["DISCOVERED:out", "any:out"],
+               "filters": [["v2.name", "!=", "Albert Einstein"]]},
+      "wrong_plan": {"operation": "list", "start": "Albert Einstein", "hops": ["DISCOVERED:out"]}
+    },
+    {
+      "id": "t03", "lang": "tr", "category": "two_hop", "intent": "aggregate",
+      "question": "Isaac Newton'un yazdığı eserle ilişkili tüm kavramları listele.",
+      "seeds": ["Isaac Newton"],
+      "expected": [["Universal Gravitation"]],
+      "plan": {"operation": "list", "start": "Isaac Newton", "hops": ["AUTHORED:out", "RELATED_TO:out"],
+               "filters": [["v2.name", "!=", "Isaac Newton"]]},
+      "wrong_plan": {"operation": "list", "start": "Isaac Newton", "hops": ["AUTHORED:out"]}
+    },
+    {
+      "id": "t04", "lang": "en", "category": "two_hop", "intent": "aggregate",
+      "question": "How many others developed something that Isaac Newton is connected to?",
+      "seeds": ["Isaac Newton"],
+      "expected": [[1]],
+      "plan": {"operation": "count", "start": "Isaac Newton", "hops": ["any:out", "DEVELOPED:in"],
+               "filters": [["v2.name", "!=", "Isaac Newton"]]},
+      "wrong_plan": {"operation": "count", "start": "Isaac Newton", "hops": ["any:out", "DEVELOPED:out"],
+                     "filters": [["v2.name", "!=", "Isaac Newton"]]}
+    },
+    {"id": "n01", "lang": "en", "category": "non_aggregate", "intent": "local",
+     "question": "Where was Albert Einstein born?", "seeds": ["Albert Einstein"]},
+    {"id": "n02", "lang": "en", "category": "non_aggregate", "intent": "local",
+     "question": "What did Isaac Newton write?", "seeds": ["Isaac Newton"]},
+    {"id": "n03", "lang": "en", "category": "non_aggregate", "intent": "multi_hop",
+     "question": "How is Isaac Newton connected to Albert Einstein?", "seeds": ["Isaac Newton", "Albert Einstein"]},
+    {"id": "n04", "lang": "en", "category": "non_aggregate", "intent": "multi_hop",
+     "question": "What is the relationship between LIGO and General Relativity?", "seeds": ["LIGO", "General Relativity"]},
+    {"id": "n05", "lang": "en", "category": "non_aggregate", "intent": "global",
+     "question": "Give me an overview of the history of physics in this graph.", "seeds": []},
+    {"id": "n06", "lang": "en", "category": "non_aggregate", "intent": "global",
+     "question": "What are the main themes of this knowledge graph?", "seeds": []},
+    {"id": "n07", "lang": "tr", "category": "non_aggregate", "intent": "local",
+     "question": "Albert Einstein nerede doğdu?", "seeds": ["Albert Einstein"]},
+    {"id": "n08", "lang": "tr", "category": "non_aggregate", "intent": "multi_hop",
+     "question": "Newton ile Einstein nasıl bağlantılı?", "seeds": ["Isaac Newton", "Albert Einstein"]},
+    {"id": "n09", "lang": "tr", "category": "non_aggregate", "intent": "global",
+     "question": "Bu bilgi grafındaki ana temalar nelerdir?", "seeds": []},
+    {"id": "n10", "lang": "tr", "category": "non_aggregate", "intent": "local",
+     "question": "Genel görelilik neyi açıklar?", "seeds": ["General Relativity"]}
+  ]
+}

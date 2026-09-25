@@ -67,8 +67,9 @@ class AggregateExecutor:
             settings.aggregate_check_min_confidence if check_threshold is None else check_threshold
         )
 
-    def _check(self, question: str, result: PlannerResult) -> float:
-        context = f"User question: {question}\nDatabase query: {result.description}"
+    def check(self, question: str, description: str) -> float:
+        """Noul P(yes) that a plan described as *description* answers *question*."""
+        context = f"User question: {question}\nDatabase query: {description}"
         return get_decision_model().noul_detailed(context, _CHECK_INSTRUCTION).score
 
     def _accepted(self, question: str, result: PlannerResult | None) -> tuple[bool, float]:
@@ -77,7 +78,7 @@ class AggregateExecutor:
         if result.confidence < self.min_confidence:
             logger.info("Plan confidence %.2f below %.2f — skipping", result.confidence, self.min_confidence)
             return False, 0.0
-        p = self._check(question, result)
+        p = self.check(question, result.description)
         return p >= self.check_threshold, p
 
     def run(self, question: str, seeds: list[str]) -> AggregateResult | None:
