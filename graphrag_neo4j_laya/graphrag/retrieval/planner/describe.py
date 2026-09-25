@@ -17,7 +17,7 @@ _OP_WORDS = {
 }
 _METRIC_WORDS = {
     "count": "number of", "count_distinct": "number of distinct", "sum": "total",
-    "avg": "average", "min": "minimum", "max": "maximum",
+    "avg": "average", "min": "minimum", "max": "maximum", "collect": "list of every",
 }
 _FIELD_WORDS = {"name": "name", "pagerank": "PageRank", "communityId": "community", "type": "relation type"}
 

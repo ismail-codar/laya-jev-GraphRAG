@@ -22,6 +22,8 @@ _NO_MATCH = "No matching entities are recorded in the graph"
 def _fmt(value: Any) -> str:
     if isinstance(value, float):
         return f"{value:.4f}"
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_fmt(v) for v in value) + "]"
     return str(value)
 
 

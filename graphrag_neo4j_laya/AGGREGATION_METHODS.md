@@ -240,6 +240,9 @@ db.aggregate_edges("Calculus", "DEVELOPED", direction="in")
 # count = 2
 ```
 
+> Gerçek demo verisinde bu sayı **1**: Newton → Calculus kenarı `DEVELOPED` yerine
+> `BORN_IN` olarak hizalandığı için yalnız Leibniz kayıtlı (bkz. aşağıdaki hizalama notu).
+
 Mevcut pipeline bu soruda boş BFS sonucu üretiyordu. Şablon ise gelen kenarları da gördüğü için doğru sonucu verir.
 
 ### Örnek: "En çok bağlantısı olan varlık hangisi?"
@@ -324,12 +327,12 @@ Kullanıcılar bu sorguyu nadiren tek parça sorar. Genelde bir gruplama anahtar
 | # | Doğal soru | Kalıp | Demo sonucu |
 | --- | --- | --- | --- |
 | 1 | "Hangi şehirde kaç bilim insanı doğmuş?" | `BORN_IN` hedefine göre grupla, `COUNT(DISTINCT kaynak)` | Ulm 1, Woolsthorpe 1, Calculus 1 (*) |
-| 2 | "Bilim insanlarının yazdığı eserleri doğum yerlerine göre say." | 2 kenar tipi: `BORN_IN` ile grupla, `AUTHORED` için `OPTIONAL MATCH` + `COUNT` | Woolsthorpe/Newton 1, Ulm/Einstein 0 |
+| 2 | "Bilim insanlarının yazdığı eserleri doğum yerlerine göre say." | 2 kenar tipi: `BORN_IN` ile grupla, `AUTHORED` için `OPTIONAL MATCH` + `COUNT` | Calculus/Newton 1 (*), Ulm/Einstein 0, Woolsthorpe/Newton 1 |
 | 3 | "Einstein'la aynı şehirde doğan başka bilim insanı var mı? Varsa kaçar eser yazmışlar?" | Anchor, 2 atlama (`e→şehir←p`, `p ≠ e`), ardından `AUTHORED` sayımı | Boş sonuç. Ulm'da başka kimse yok |
 | 4 | "Kim kaç katkı yapmış? Keşif, geliştirme ve yazılan eserleri ayrı ayrı göster." | İlişki tipi whitelist'i (`IN [...]`), özneye göre `COUNT` + `collect(r.type)` | Einstein, Leibniz, Newton, LIGO: 1'er |
 | 5 | "Evrensel Kütleçekimi'ne hangi kavramlar hangi ilişkiyle bağlanıyor?" | Gelen kenarlar, ilişki tipine göre grupla | `EXTENDS`: General Relativity, `RELATED_TO`: Principia Mathematica |
 | 6 | "En merkezi konularla ilgilenen üç varlık hangisi?" | Özneye göre grupla, `AVG(t.pagerank)` ile sırala, `LIMIT 3` | Principia 0.1306, LIGO 0.1209, Leibniz 0.1106 |
-| 7 | "Bilim insanlarının çalışmaları başka hangi kavramlara yol açmış?" | 2 atlama (`kişi→çalışma→kavram`), `(kişi, çalışma)` ikilisine göre `COUNT` | Einstein/General Relativity 3 (`EXTENDS`, `EXPLAINS`, `PREDICTED`) |
+| 7 | "Bilim insanlarının çalışmaları başka hangi kavramlara yol açmış?" | 2 atlama (`kişi→çalışma→kavram`), `(kişi, çalışma)` ikilisine göre `COUNT` | Einstein/General Relativity 3 (`EXTENDS`, `EXPLAINS`, `PREDICTED`), Newton/Principia Mathematica 1 (`RELATED_TO`) |
 | 8 | "Birden fazla yerde doğmuş görünen biri var mı?" | `BORN_IN` için özneye göre grupla, `COUNT(DISTINCT t) > 1` | Newton 2 (Woolsthorpe, Calculus). Veri kalitesi kontrolü |
 
 (*) `Calculus` şehir değil. Newton → Calculus `DEVELOPED` kenarı `BORN_IN` olarak yanlış hizalandığı için şehir listesine giriyor (bkz. yukarıdaki hizalama notu). Soru 8 tam da bu hatayı yakalar.
@@ -774,7 +777,7 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 - **Hop seçimi yazı-tura düzeyinde.** Örnek: `BORN_IN:out` 0,36, `BORN_IN:in` 0,34. `stop` genellikle erken değil geç seçiliyor; bir soruda 3 hop'luk anlamsız bir yol kuruldu.
 - **Geri çeviri kontrolü zayıf bir ayırıcı.** Doğru planların yarısını reddediyor, yanlışların üçte birini geçiriyor. Onarım adımı bu yüzden az işe yarıyor.
 - **İşlem, filtre ve `HAVING` adımları görece iyi**, ama bu adımların çoğu soruda "yok" cevabı bekleniyor; yüksek oran kısmen bundan geliyor.
-- **Mimari beklendiği gibi çalışıyor:** bütün geçersiz hamleler yapısal olarak engelleniyor, üretilen her plan geçerli Cypher'a dönüşüyor, boş ve kesilmiş sonuçlar doğru raporlanıyor (187 birim testi).
+- **Mimari beklendiği gibi çalışıyor:** bütün geçersiz hamleler yapısal olarak engelleniyor, üretilen her plan geçerli Cypher'a dönüşüyor, boş ve kesilmiş sonuçlar doğru raporlanıyor (229 birim testi).
 
 ### Sonraki denemeler (ölçülmedi)
 
@@ -792,6 +795,7 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 | `graphrag/retrieval/planner/executor.py`, `facts.py`, `semantic_filter.py` | Kontrol, onarım, çalıştırma, fact ve şablon cevap, anlamsal filtre |
 | `graphrag/retrieval/router.py`, `graphrag/pipeline.py` | `aggregate` niyeti (bayraklı), `pipeline.query_aggregate()` |
 | `graphrag/benchmarks/aggregate_planner_eval.py` | Ölçüm düzeneği |
+| `tests/test_aggregation_examples.py` | Bu dokümandaki örnek soruların sorgu testleri |
 
 ---
 
@@ -846,6 +850,8 @@ Mevcut şema: `Entity(name, description, pagerank, communityId)`, `RELATES_TO(ty
 | Çok seviyeli `GROUP BY` | Community × Subject × Relation tablosu | G | G | G | ✗ | — | ✓ | `group_edges` + Yöntem 3'te satır başına fact. Router yerine `query_aggregate` API'si önerilir |
 | Roll-up | Aynı tablo, özne seviyesinde | G | G | G | ✗ | — | ✓ | `keys` listesinden bir seviye çıkarmak |
 | `HAVING` (grup sonrası filtre) | Birden fazla doğum yeri olan kişi? | G | G | G | ✗ | — | ✓ | `group_edges(having=...)`, Cypher'da `WITH ... WHERE` |
+| İlişki tiplerini listeleme (`collect`) | Kim hangi tür katkılar yapmış? | ✗ | G | G | ✗ | — | ✓ | `collect` metriği plan dilinde var; planlayıcının metrik `Choice` listesinde yok, yani şimdilik yalnız `query_aggregate` ile |
+| İkinci ilişki tipi üzerinden isteğe bağlı sayım | Doğum yerine göre yazılan eser sayısı | ✗ | ✗ | ✗ | ✗ | — | ✗ | Plan dilinde ikinci bir dal ve `OPTIONAL MATCH` (soru 2 ve 3'ün eser sayıları) |
 | Kenar destek skoru metrikleri | Kanıtı en zayıf ilişki grubu? | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | **Veri:** `RELATES_TO.support DOUBLE` kolonu ve `upsert_edge`'in Laya skorunu yazması |
 | Tematik özet | Kütleçekimiyle ilgili ana fikirler? | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | Yöntem 4 (community özetleri) |
 

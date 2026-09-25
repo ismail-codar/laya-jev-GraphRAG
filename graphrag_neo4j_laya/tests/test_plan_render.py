@@ -32,6 +32,9 @@ def _ae3() -> QueryPlan:
     )
 
 
+_COLLECT_TYPE = Metric("collect", FieldRef("e0", "type"))
+
+
 def _grouped(keys, metrics, **kw) -> QueryPlan:
     return QueryPlan(operation="group", start=None, hops=[Hop(None, "out")], keys=keys, metrics=metrics, **kw)
 
@@ -139,6 +142,20 @@ class TestRender:
         rows, truncated = fetch(science_graph, plan)
         assert len(rows) == 4 and truncated is False
 
+    def test_collect_gathers_a_field_per_group(self, science_graph):
+        plan = _grouped(
+            [FieldRef("v0", "name")],
+            [Metric("collect", FieldRef("e0", "type")), Metric("count_distinct", FieldRef("v1", "name"))],
+        )
+        rendered = render(plan)
+        assert "collect(e0.type) AS collect_e0_type" in rendered.cypher
+        # Still DISTINCT last, so the collect is not zeroed by Kùzu 0.11.3.
+        assert rendered.cypher.index("count(DISTINCT") > rendered.cypher.index("collect(")
+        rows, _ = fetch(science_graph, plan)
+        newton = next(r for r in rows if r["v0_name"] == "Isaac Newton")
+        assert newton["collect_e0_type"] == ["AUTHORED", "BORN_IN", "LEADS", "BORN_IN"]
+        assert newton["count_distinct_v1_name"] == 4
+
     def test_injection_attempt_is_only_a_parameter(self, science_graph):
         payload = "x' OR 1=1 // MATCH (n) DETACH DELETE n"
         plan = QueryPlan(operation="count", start=payload, hops=[Hop(None, "out")])
@@ -160,6 +177,17 @@ class TestValidation:
         QueryPlan(operation="group", start=None, keys=[FieldRef("v0", "name")],
                   metrics=[Metric("sum", FieldRef("v0", "name"))]),
         QueryPlan(operation="rank", start=None, keys=[FieldRef("v0", "name")]),
+        # `collect` returns a list: it cannot be ranked by, compared or ordered by.
+        QueryPlan(operation="group", start=None, keys=[FieldRef("v0", "name")],
+                  metrics=[Metric("collect")]),
+        QueryPlan(operation="rank", start=None, hops=[Hop(None, "out")],
+                  keys=[FieldRef("v0", "name")], metrics=[Metric("collect", FieldRef("e0", "type"))]),
+        QueryPlan(operation="group", start=None, hops=[Hop(None, "out")],
+                  keys=[FieldRef("v0", "name")], metrics=[_COLLECT_TYPE],
+                  having=[Having(_COLLECT_TYPE, ">", 1)]),
+        QueryPlan(operation="group", start=None, hops=[Hop(None, "out")],
+                  keys=[FieldRef("v0", "name")], metrics=[_COLLECT_TYPE],
+                  order=[Order(_COLLECT_TYPE)]),
         QueryPlan(operation="count", start=None, hops=[Hop(None, "both")]),
         QueryPlan(operation="explode", start=None),
         QueryPlan(operation="count", start=None, limit=0),
@@ -188,6 +216,10 @@ class TestDescribe:
         text = describe_plan(plan, {})
         assert "every entity" in text
         assert "relation type" in text and "average" in text
+
+    def test_collect_description(self):
+        plan = _grouped([FieldRef("v0", "name")], [_COLLECT_TYPE])
+        assert "list of every relation type of the step-1 relation" in describe_plan(plan, {})
 
     def test_filter_description(self):
         text = describe_plan(_ae3(), {})

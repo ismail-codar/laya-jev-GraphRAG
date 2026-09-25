@@ -26,8 +26,11 @@ NODE_FIELDS = ("name", "pagerank", "communityId")
 EDGE_FIELDS = ("type",)
 NUMERIC_FIELDS = ("pagerank", "communityId")
 FILTER_OPS = ("=", "!=", "<", "<=", ">", ">=", "in", "not_in")
-METRIC_OPS = ("count", "count_distinct", "sum", "avg", "min", "max")
+METRIC_OPS = ("count", "count_distinct", "sum", "avg", "min", "max", "collect")
 NUMERIC_METRIC_OPS = ("sum", "avg", "min", "max")
+# `collect` gathers a field into a list per group. A list can be returned but
+# not compared with a number, so it may not carry a having, an order or a rank.
+LIST_METRIC_OPS = ("collect",)
 MAX_LIMIT = 10_000
 
 _VAR_RE = re.compile(r"^([ve])(\d+)$")
@@ -156,6 +159,8 @@ def validate_plan(plan: QueryPlan) -> None:
     for h in plan.having:
         _check_metric(h.metric, plan)
         _check_comparison(h.op, h.value)
+        if h.metric.op in LIST_METRIC_OPS:
+            raise ValueError(f"metric {h.metric.op!r} returns a list and cannot be compared")
         if h.metric not in plan.metrics:
             raise ValueError("having must refer to a metric the plan returns")
     if plan.operation in ("group", "rank"):
@@ -163,6 +168,11 @@ def validate_plan(plan: QueryPlan) -> None:
             raise ValueError(f"{plan.operation!r} needs at least one key")
         if not plan.metrics:
             raise ValueError(f"{plan.operation!r} needs at least one metric")
+        # The renderer ranks by the first metric when no order is given.
+        if plan.operation == "rank" and plan.metrics[0].op in LIST_METRIC_OPS:
+            raise ValueError(f"{plan.metrics[0].op!r} returns a list and cannot be ranked by")
     for o in plan.order:
         if o.key not in plan.keys and o.key not in plan.metrics:
             raise ValueError("order must refer to a returned key or metric")
+        if isinstance(o.key, Metric) and o.key.op in LIST_METRIC_OPS:
+            raise ValueError(f"metric {o.key.op!r} returns a list and cannot be ordered by")
