@@ -68,36 +68,44 @@ class GraphRAGPipeline:
     ----------
     graph_client:
         Optional pre-constructed graph client (useful for testing).
+    llm:
+        Optional object with a ``generate(prompt: str) -> str`` method used for
+        answer synthesis. Defaults to the local Llama-3.1 8B NF4 model.
     """
 
-    def __init__(self, graph_client: BaseGraphClient | None = None) -> None:
+    def __init__(self, graph_client: BaseGraphClient | None = None, llm: Any = None) -> None:
         self._db     = graph_client or get_graph_client()
         self._router = IntentRouter()
         self._seeds  = SeedSelector(self._db)
         self._astar  = LayaGraphNavigator(self._db)
         self._bfs    = ScoreGatedBFS(self._db)
-        self._llm    = get_llm()
+        self._llm    = llm or get_llm()
 
     # ── Path → node list conversion ───────────────────────────────────────────
 
-    @staticmethod
-    def _paths_to_nodes(paths: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _node_text(self, name: str, fact: str | None = None) -> str:
+        """Node description, prefixed with the traversed fact that reached it."""
+        text = self._db.get_node_text(name)
+        return f"{fact}. {text}" if fact else text
+
+    def _paths_to_nodes(self, paths: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Convert traversal path dicts into node dicts for post-processing."""
         seen: set[str] = set()
         nodes: list[dict] = []
         for p in paths:
-            for i, name in enumerate(p.get("path", [])):
+            path, edges = p.get("path", []), p.get("edges", [])
+            for i, name in enumerate(path):
                 if name not in seen:
                     seen.add(name)
+                    fact = f"{path[i - 1]} {edges[i - 1]} {name}" if 0 < i <= len(edges) else None
                     nodes.append({
                         "name":  name,
-                        "text":  name,            # real text from graph would be here
+                        "text":  self._node_text(name, fact),
                         "score": p.get("score", 0.0) * (0.9 ** i),  # decay by hop depth
                     })
         return nodes
 
-    @staticmethod
-    def _edges_to_nodes(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _edges_to_nodes(self, edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen: set[str] = set()
         nodes: list[dict] = []
         for e in edges:
@@ -105,7 +113,15 @@ class GraphRAGPipeline:
                 name = e.get(key, "")
                 if name and name not in seen:
                     seen.add(name)
-                    nodes.append({"name": name, "text": name, "score": e.get("score", 0.0)})
+                    fact = (
+                        f"{e['source']} {e['edge_type']} {name}"
+                        if key == "target" and e.get("edge_type") else None
+                    )
+                    nodes.append({
+                        "name":  name,
+                        "text":  self._node_text(name, fact),
+                        "score": e.get("score", 0.0),
+                    })
         return nodes
 
     @staticmethod
@@ -155,7 +171,11 @@ class GraphRAGPipeline:
 
         elif intent == QueryIntent.LOCAL:
             edges = self._bfs.retrieve(seed_names, user_query)
-            raw_nodes = self._edges_to_nodes(edges)
+            # Seeds are the entry points the query matched; keep them as context too
+            # (after the edges, so nodes reached by an edge keep that fact in their text)
+            raw_nodes = self._edges_to_nodes(
+                edges + [{"source": s, "score": 1.0} for s in seed_names]
+            )
 
         else:  # Global
             all_paths = []

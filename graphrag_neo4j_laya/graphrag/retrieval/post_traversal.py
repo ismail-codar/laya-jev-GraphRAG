@@ -206,14 +206,11 @@ def hallucination_gate(
 
     # Build a summary of the retrieved context
     context_summary = " | ".join(
-        f"{n.get('name', '?')}: {n.get('text', '')[:100]}"
+        f"{n.get('name', '?')}: {n.get('text', '')[:200]}"
         for n in context_nodes[:10]
     )
-    context = f"Retrieved knowledge: {context_summary}"
-    instruction = (
-        f"Is the retrieved knowledge above factually sufficient to answer the question "
-        f"'{user_query}' without guessing or making up information?"
-    )
+    context = f"Question: {user_query}\n\nRetrieved knowledge: {context_summary}"
+    instruction = "Does the retrieved knowledge contain the answer to the question?"
 
     noul_score = model.noul(context, instruction)
     is_sufficient = noul_score >= threshold
@@ -261,7 +258,7 @@ def verify_citations(
     model = get_decision_model()
 
     context_text = " | ".join(
-        f"{n.get('name', '?')}: {n.get('text', '')[:80]}"
+        f"{n.get('name', '?')}: {n.get('text', '')[:200]}"
         for n in context_nodes[:10]
     )
     context = (

@@ -29,6 +29,7 @@ def _make_navigator(neighbors_map: dict, laya_scores: dict | None = None) -> Lay
     mock_neo4j.get_neighbors.side_effect = lambda name: neighbors_map.get(name, [])
 
     mock_laya = MagicMock()
+    mock_laya.noul.return_value = 0.0   # never trigger early termination
     if laya_scores is None:
         mock_laya.score.return_value = 0.8
     else:
@@ -40,7 +41,7 @@ def _make_navigator(neighbors_map: dict, laya_scores: dict | None = None) -> Lay
         mock_laya.score.side_effect = _score
 
     nav = LayaGraphNavigator.__new__(LayaGraphNavigator)
-    nav._neo4j     = mock_neo4j
+    nav._db        = mock_neo4j
     nav._laya      = mock_laya
     nav.ALPHA      = 0.65
     nav.BETA       = 0.25

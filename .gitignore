@@ -11,6 +11,10 @@ __pycache__/
 .env
 .env.local
 
+# Embedded Kùzu databases (quickstart demo + default KUZU_DB_PATH)
+graphrag_neo4j_laya/examples/.kuzu_demo
+kuzu_db
+
 # Ignore virtual environments
 venv/
 env/

@@ -1,0 +1,56 @@
+{
+  "description": "Small science-history knowledge graph. `triples` are what an LLM extraction step would emit from `documents`: free-text relation strings, each pointing at the chunk it came from. Two of them are deliberately hallucinated; Laya should reject them against their source text.",
+  "schema": {
+    "AUTHORED":   "wrote, published or authored a work",
+    "BORN_IN":    "was born in a place",
+    "DEVELOPED":  "formulated, invented or developed an idea, theory or technology",
+    "LEADS":      "was president, head or leader of an organisation",
+    "DISCOVERED": "discovered, detected or first observed something",
+    "PREDICTED":  "predicted or foresaw a phenomenon",
+    "EXTENDS":    "generalises, extends or builds upon another theory",
+    "EXPLAINS":   "explains or describes a phenomenon",
+    "RELATED_TO": "any other relationship"
+  },
+  "documents": {
+    "newton": "Isaac Newton was born in Woolsthorpe, Lincolnshire. In 1687 he wrote Principia Mathematica, which introduced the law of universal gravitation. He came up with calculus at roughly the same time as Gottfried Leibniz, who developed it independently. He later served as president of the Royal Society.",
+    "einstein": "Albert Einstein was born in Ulm. In 1915 he formulated general relativity, a theory that generalises Newton's universal gravitation and explains gravity as the curvature of spacetime. General relativity predicted gravitational waves.",
+    "ligo": "In 2015 the LIGO observatory first detected gravitational waves, confirming a century-old prediction of general relativity."
+  },
+  "entities": {
+    "Isaac Newton": "English physicist and mathematician, author of the laws of motion and universal gravitation.",
+    "Principia Mathematica": "Newton's 1687 book laying out classical mechanics and the law of universal gravitation.",
+    "Universal Gravitation": "Law stating every mass attracts every other mass with a force proportional to their masses.",
+    "Calculus": "Branch of mathematics dealing with rates of change and accumulation.",
+    "Gottfried Leibniz": "German mathematician who developed calculus independently of Newton.",
+    "Albert Einstein": "German-born physicist who developed the theory of relativity.",
+    "General Relativity": "Einstein's 1915 theory describing gravity as the curvature of spacetime.",
+    "Spacetime Curvature": "The bending of spacetime by mass and energy, which is experienced as gravity.",
+    "Gravitational Waves": "Ripples in spacetime predicted by general relativity.",
+    "LIGO": "Laser Interferometer Gravitational-Wave Observatory, which first detected gravitational waves in 2015.",
+    "Royal Society": "Learned society for science in the United Kingdom, founded in 1660.",
+    "Woolsthorpe": "Hamlet in Lincolnshire, England, where Isaac Newton was born.",
+    "Ulm": "City in Germany where Albert Einstein was born.",
+    "Banana Bread": "A sweet bread made from mashed bananas."
+  },
+  "triples": [
+    ["Isaac Newton", "wrote", "Principia Mathematica", "newton"],
+    ["Principia Mathematica", "introduced the law of", "Universal Gravitation", "newton"],
+    ["Isaac Newton", "came up with", "Calculus", "newton"],
+    ["Gottfried Leibniz", "independently developed", "Calculus", "newton"],
+    ["Isaac Newton", "was president of", "Royal Society", "newton"],
+    ["Isaac Newton", "was born in", "Woolsthorpe", "newton"],
+    ["Albert Einstein", "was born in", "Ulm", "einstein"],
+    ["Albert Einstein", "formulated", "General Relativity", "einstein"],
+    ["General Relativity", "generalises", "Universal Gravitation", "einstein"],
+    ["General Relativity", "explains gravity as", "Spacetime Curvature", "einstein"],
+    ["General Relativity", "predicted", "Gravitational Waves", "einstein"],
+    ["LIGO", "first detected", "Gravitational Waves", "ligo"],
+    ["Isaac Newton", "baked", "Banana Bread", "newton"],
+    ["LIGO", "was born in", "Ulm", "ligo"]
+  ],
+  "queries": [
+    "Where was Isaac Newton born?",
+    "How is Newton's work connected to Einstein's theory of gravity?",
+    "Yerçekimi dalgalarını ilk kim tespit etti?"
+  ]
+}

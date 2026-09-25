@@ -66,8 +66,8 @@ class ScoreGatedBFS:
             logger.debug("BFS: '%s' → %d neighbours", seed, len(edges))
 
             for edge in edges:
-                context     = f"Node: {seed}. Edge: {edge['type']}. Target: {edge['target_name']}."
-                instruction = f"Score relevance to: '{user_query}'"
+                context     = f"Fact: {seed} {edge['type']} {edge['target_name']}."
+                instruction = f"How relevant is this fact to answering: '{user_query}'"
                 score = self._laya.score(context, instruction)
 
                 if score >= self._threshold:

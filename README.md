@@ -6,6 +6,8 @@
 ![Databases](https://img.shields.io/badge/DB-Neo4j%20%7C%20Memgraph%20%7C%20AGE%20%7C%20Kùzu-018bff.svg)
 ![Backend](https://img.shields.io/badge/AI%20Backend-Laya%20%7C%20Jev%20%7C%20Ablation-blueviolet.svg)
 
+**Türkçe:** [README_TR.md](README_TR.md)
+
 **laya-jev-GraphRAG** is a **graph-database-agnostic Agentic GraphRAG framework** — a production-ready intelligence layer you drop on top of your existing graph database to make it fully agentic. It doesn't replace your graph DB; it gives it a brain.
 
 Instead of hard-wiring GraphRAG logic to a single database, this framework **completely decouples the AI decision layer from the storage layer**. The same complete **4-phase pipeline** (Ingestion → Pre-Retrieval → Traversal → Post-Retrieval) runs identically across Neo4j, Memgraph, Apache AGE, and Kùzu — switched with one environment variable.
@@ -79,7 +81,7 @@ This is the key architectural decision: **both axes are independent**.
 | Axis | Options | How to Switch |
 |------|---------|---------------|
 | **AI Decision Model** | Laya (local GPU) ↔ Jev (cloud API) ↔ Ablation (both) | `DECISION_MODEL_BACKEND=laya\|jev\|ablation` |
-| **Graph Database** | Neo4j ↔ Memgraph ↔ Apache AGE ↔ Kùzu | `GRAPH_DB_BACKEND=neo4j\|memgraph\|age\|kuzu` |
+| **Graph Database** | Neo4j ↔ Memgraph ↔ Apache AGE ↔ Kùzu | `GRAPH_DB_TYPE=neo4j\|memgraph\|postgres_age\|kuzu` |
 
 You can run **Jev + Neo4j** in production, **Laya + Kùzu** for local development with zero Docker, or **Ablation + Memgraph** to generate training data — all from the same codebase with zero code changes.
 
@@ -102,20 +104,20 @@ The end state: a **fully local, frontier-quality GraphRAG engine** on your own h
 
 ```bash
 # AI Decision Model (.env)
-DECISION_MODEL_BACKEND=laya      # Local CUDA, free, ~33ms/call, ~1.2 GB VRAM
+DECISION_MODEL_BACKEND=laya      # Local (CUDA or CPU), free, 100% private
 DECISION_MODEL_BACKEND=jev       # TypeSafe cloud API, zero-shot ready, ~50ms/call
 DECISION_MODEL_BACKEND=ablation  # Run BOTH, log side-by-side for RLCD fine-tuning
 
 # Graph Database (.env)
-GRAPH_DB_BACKEND=neo4j       # Production: index-free adjacency, native GDS
-GRAPH_DB_BACKEND=memgraph    # In-memory Bolt: identical Cypher, low-latency analytics
-GRAPH_DB_BACKEND=age         # PostgreSQL + Apache AGE: unified SQL/graph stack
-GRAPH_DB_BACKEND=kuzu        # Embedded local: no Docker, zero setup for development
+GRAPH_DB_TYPE=neo4j          # Production: index-free adjacency, native GDS
+GRAPH_DB_TYPE=memgraph       # In-memory Bolt: identical Cypher, low-latency analytics
+GRAPH_DB_TYPE=postgres_age   # PostgreSQL + Apache AGE: unified SQL/graph stack
+GRAPH_DB_TYPE=kuzu           # Embedded local: no Docker, zero setup for development
 ```
 
 | Feature | Laya (Local) | Jev (Cloud) |
 |---------|-------------|-------------|
-| Model | `convaiinnovations/laya-typed-decisions` 421M | `jev-1.13` (TypeSafe) |
+| Model | `convaiinnovations/laya` (multilingual 322M, default) | `jev-1.13` (TypeSafe) |
 | Latency | ~33 ms (RTX 5060 FP16) | ~50 ms (API round-trip) |
 | Cost | Free | ~$0.042 / M tokens |
 | Privacy | 100% local | API |
@@ -184,39 +186,248 @@ All four graph DB backends implement the same `BaseGraphClient` interface. **Zer
 git clone https://github.com/bodepudimuneendra-netizen/laya-jev-GraphRAG.git
 cd laya-jev-GraphRAG/graphrag_neo4j_laya
 
-# Install PyTorch with CUDA 12.4 first (for your GPU)
+# Optional: PyTorch with CUDA 12.4 (skip on CPU-only machines, Laya also runs on CPU)
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 
-# Install all remaining dependencies
+# All remaining dependencies (includes `laya` and `kuzu`)
 pip install -r requirements.txt
 ```
 
-### Configure your backend
+### Quickstart: Laya + Kùzu, no Docker needed
+
+The fastest way to see the whole pipeline work is the bundled example. It uses **Laya** (local, no API key) as the decision model and **Kùzu** (embedded, runs inside the Python process) as the graph database. It runs on CPU. A GPU makes it faster but isn't needed.
 
 ```bash
-cp .env.example .env
-# Then edit .env to set:
-#   DECISION_MODEL_BACKEND=laya
-#   GRAPH_DB_BACKEND=kuzu   ← Start here: no Docker required
+cd graphrag_neo4j_laya
+python examples/laya_kuzu_quickstart.py
 ```
 
-### Run a query
+The first run downloads the Laya multilingual checkpoint (~1.3 GB) and the multilingual embedding model. After that, the full run (ingestion plus three queries) takes about a minute on CPU.
+
+What the script does, using `examples/data/science_history.json`:
+
+| Step | Laya primitive | What happens |
+|------|----------------|--------------|
+| 1. Load entities | — | 14 nodes with descriptions and embeddings go into Kùzu |
+| 2. Edge verification | `Noul` | Each extracted triple is checked against the source text it came from; unsupported triples are dropped |
+| 3. Ontology alignment | `Choice` | Free-text relations (`"first detected"`) are mapped onto the dataset schema (`DISCOVERED`) |
+| 4. Structure | — | PageRank + connected components are written back to Kùzu |
+| 5. Query | `Choice` · `Score` · `Noul` | Intent routing, seed validation, A\*/BFS traversal, reranking, hallucination gate, citation check |
+
+Output from a CPU run (default multilingual checkpoint):
+
+```text
+[2/4] Edge verification against source text (Laya Noul, keep >= 0.5)
+  keep  P=0.996  Isaac Newton -[was born in]-> Woolsthorpe
+  keep  P=0.974  LIGO -[first detected]-> Gravitational Waves
+  ...
+  PRUNE P=0.000  Isaac Newton -[baked]-> Banana Bread        ← hallucinated, removed
+  PRUNE P=0.006  LIGO -[was born in]-> Ulm                   ← hallucinated, removed
+
+[3/4] Ontology alignment (Laya Choice)
+                     'wrote' → AUTHORED
+          'was president of' → LEADS
+            'first detected' → DISCOVERED
+
+Q: Where was Isaac Newton born?
+- Woolsthorpe: Isaac Newton BORN_IN Woolsthorpe. Hamlet in Lincolnshire, England, where Isaac Newton was born.
+- Isaac Newton: English physicist and mathematician, author of the laws of motion and universal gravitation.
+
+Q: How is Newton's work connected to Einstein's theory of gravity?
+I don't have enough verified information in my knowledge graph to confidently answer this question. ...
+
+Q: Yerçekimi dalgalarını ilk kim tespit etti?
+[⚠️ UNVERIFIED] - Gravitational Waves: LIGO DISCOVERED Gravitational Waves. Ripples in spacetime predicted by general relativity.
+...
+```
+
+Every outcome in that run comes from a pipeline safety check doing its job:
+- **Q1:** routed `local`, answered from the verified `BORN_IN` edge, citation check passed.
+- **Q2:** routed `multi_hop`. The hallucination gate judged the retrieved context too weak and the pipeline abstained rather than guess.
+- **Q3** (Turkish, against English data): retrieval found the `LIGO DISCOVERED Gravitational Waves` fact. The citation check scored just under its 0.90 bar, so the answer is flagged `[⚠️ UNVERIFIED]`.
+
+#### Quickstart options
+
+```bash
+# Your own questions (repeatable)
+python examples/laya_kuzu_quickstart.py -q "Where was Albert Einstein born?" -q "Who wrote Principia Mathematica?"
+
+# Log every phase: intent, seeds, gate and citation scores
+python examples/laya_kuzu_quickstart.py -v
+
+# Your own dataset, deeper A* search, stricter edge verification
+python examples/laya_kuzu_quickstart.py --data my_graph.json --max-depth 4 --support-threshold 0.8
+
+# Real LLM synthesis instead of the extractive answer (needs CUDA + bitsandbytes)
+python examples/laya_kuzu_quickstart.py --llm llama
+```
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--data` | `examples/data/science_history.json` | Dataset to ingest |
+| `-q / --query` | dataset `queries` | Question to run (repeatable) |
+| `-d / --max-depth` | `3` | Maximum A\* hop depth |
+| `--support-threshold` | `0.5` | Minimum Laya `P(source supports edge)` to keep a triple |
+| `--llm` | `extractive` | `extractive` returns the verified context itself (no GPU); `llama` uses Llama-3.1-8B NF4 |
+| `-v / --verbose` | off | Print the log line for every pipeline phase |
+
+The script pins `DECISION_MODEL_BACKEND=laya` and `GRAPH_DB_TYPE=kuzu`, and rebuilds the database on each run. Everything else (Laya checkpoint, thresholds) still comes from `.env`.
+
+#### Bring your own data
+
+The dataset is a single JSON file. `triples` are what an LLM extraction step would produce: a free-text relation plus the id of the document chunk it was extracted from.
+
+```json
+{
+  "schema":    { "BORN_IN": "was born in a place", "DISCOVERED": "discovered, detected or first observed something" },
+  "documents": { "doc1": "Marie Curie was born in Warsaw. She discovered polonium and radium." },
+  "entities":  { "Marie Curie": "Physicist and chemist, pioneer of radioactivity research.",
+                 "Warsaw": "Capital city of Poland." },
+  "triples":   [ ["Marie Curie", "was born in", "Warsaw", "doc1"] ],
+  "queries":   [ "Where was Marie Curie born?" ]
+}
+```
+
+`schema` is optional; without it the built-in 17-type ontology in `graphrag/ingestion/ontology_aligner.py` is used. A small schema written for your domain aligns much better.
+
+### Usage examples (Python)
+
+#### 1. Use the Laya primitives directly
+
+```python
+from graphrag.models.laya import get_laya
+
+laya = get_laya()   # loads convaiinnovations/laya (multilingual) once, then stays resident
+
+# Score: ordinal relevance in [0, 1]
+laya.score(
+    "Fact: LIGO DISCOVERED Gravitational Waves.",
+    "How relevant is this fact to answering: 'Who first detected gravitational waves?'",
+)   # → 0.65
+
+# Noul: binary P(yes)
+laya.noul(
+    "Source text: Isaac Newton was born in Woolsthorpe.\n\n"
+    "Extracted relationship: Isaac Newton -[baked]-> Banana Bread",
+    "Does the source text explicitly support this extracted relationship?",
+)   # → 0.03
+
+# Choice: returns one option key; all options are scored in a single forward pass
+laya.choice(
+    "User question: How is Newton's work connected to Einstein's theory of gravity?",
+    "Which graph retrieval strategy should be used to answer this question?",
+    {
+        "local":     "The question asks about one specific fact of one entity.",
+        "multi_hop": "The question asks how two or more entities are connected, requiring a chain of facts.",
+        "global":    "The question asks for a broad summary or overview of a whole topic.",
+    },
+)   # → "multi_hop"
+
+# Several questions about the same state, answered in one forward pass
+laya.ask_batch(
+    "Customer: my invoice was charged twice this month, please refund one.",
+    {
+        "is_billing": {"type": "noul",   "instruction": "Is this a billing issue?"},
+        "urgency":    {"type": "score",  "instruction": "How urgent is this request?"},
+        "team":       {"type": "choice", "instruction": "Route to which team?",
+                       "options": {"billing": "Billing team", "tech": "Technical support"}},
+    },
+)   # → {"is_billing": DecisionResult(score=0.81, ...), "team": DecisionResult(selected="billing", ...), ...}
+```
+
+Every `*_detailed` method (`score_detailed`, `noul_detailed`, `choice_detailed`) returns a `DecisionResult` carrying the probabilities, confidence and latency.
+
+#### 2. Build and query a Kùzu graph from your own code
+
+```python
+import os
+os.environ["GRAPH_DB_TYPE"] = "kuzu"            # or set it in .env
+os.environ["DECISION_MODEL_BACKEND"] = "laya"
+
+from sentence_transformers import SentenceTransformer
+
+from config.settings import settings
+from graphrag.graph.kuzu_client import KuzuClient
+from graphrag.ingestion.edge_verifier import EdgeVerifier
+from graphrag.ingestion.ontology_aligner import OntologyAligner
+from graphrag.pipeline import GraphRAGPipeline
+
+source = "Marie Curie was born in Warsaw. She discovered polonium and radium."
+entities = {
+    "Marie Curie": "Physicist and chemist, pioneer of research on radioactivity.",
+    "Warsaw": "Capital city of Poland, where Marie Curie was born.",
+    "Paris": "Capital city of France.",
+    "Polonium": "Radioactive chemical element discovered by Marie Curie in 1898.",
+    "Radium": "Radioactive chemical element discovered by the Curies in 1898.",
+}
+triples = [
+    ("Marie Curie", "was born in", "Warsaw"),
+    ("Marie Curie", "discovered", "Polonium"),
+    ("Marie Curie", "discovered", "Radium"),
+    ("Marie Curie", "was born in", "Paris"),     # hallucinated → rejected (P≈0.01)
+]
+
+db = KuzuClient()                               # KUZU_DB_PATH, default ./kuzu_db
+db.create_schema()
+embedder = SentenceTransformer(settings.embed_model_id)
+for name, description in entities.items():
+    db.upsert_node(name, properties={"description": description})
+    db.set_embedding(name, embedder.encode(f"{name}: {description}", normalize_embeddings=True).tolist())
+
+verifier, aligner = EdgeVerifier(db), OntologyAligner()
+for src, raw_rel, tgt in triples:
+    if verifier.verify_against_source(src, raw_rel, tgt, source) >= 0.5:        # Noul
+        db.upsert_edge(src, tgt, aligner.align(raw_rel, source=src, target=tgt))  # Choice
+db.run_pagerank()
+
+
+class EchoLLM:
+    """Stand-in synthesiser: returns the verified context lines (no GPU needed)."""
+    def generate(self, prompt: str, **_) -> str:
+        return "\n".join(l for l in prompt.splitlines() if l.startswith("- "))
+
+
+pipeline = GraphRAGPipeline(graph_client=db, llm=EchoLLM())   # llm=None → Llama-3.1-8B
+print(pipeline.query("Where was Marie Curie born?"))
+```
+
+> **Kùzu note:** `KuzuClient` keeps node embeddings in process memory. Build the graph and query it **in the same process** (as above and in the quickstart). If you run `python -m graphrag.pipeline` against a Kùzu database built by another process, seed selection finds no entry points. Use Neo4j, Memgraph or AGE for a graph that outlives the process.
+
+#### 3. Run the full CLI pipeline (Neo4j / Memgraph / AGE + Llama)
+
+```bash
+docker compose up -d neo4j          # or: memgraph | apache-age (see docker-compose.yml)
+cp .env.example .env                # set GRAPH_DB_TYPE=neo4j, HUGGINGFACE_TOKEN=...
+python -m graphrag.pipeline --query "What caused the 2008 financial crisis?" --max-depth 4
+```
 
 ```python
 from graphrag.pipeline import GraphRAGPipeline
 
-pipeline = GraphRAGPipeline()
-answer = pipeline.query("What caused the 2008 financial crisis?")
-print(answer)
+pipeline = GraphRAGPipeline()       # graph DB + decision model from .env, Llama for synthesis
+print(pipeline.query("What caused the 2008 financial crisis?"))
 ```
 
-Or from the CLI:
+#### 4. Choose a Laya checkpoint
+
+Laya loads through the official [`laya`](https://pypi.org/project/laya/) package. Pick the checkpoint in `.env`:
 
 ```bash
-python -m graphrag.pipeline --query "What caused the 2008 financial crisis?" --max-depth 4
+LAYA_MODEL_ID=convaiinnovations/laya
+LAYA_MODEL_SUBFOLDER=multilingual     # default: mmBERT-base, 322M, 100+ languages (Turkish included)
+# LAYA_MODEL_SUBFOLDER=               # English, ModernBERT-large, 421M
+# LAYA_MODEL_SUBFOLDER=typed-decisions # English specialist for 4 synthetic workflows
+LAYA_DEVICE=                          # cuda | cpu, auto-detected when empty
 ```
 
-### Run the ablation harness
+Same quickstart, CPU, both checkpoints:
+
+| Checkpoint | Hallucinated edges pruned | Queries answered (verified / flagged / abstained) | Ingestion |
+|------------|---------------------------|---------------------------------------------------|-----------|
+| `multilingual` (default) | 2 / 2 | 1 / 1 / 1 | ~25 s |
+| English root | 2 / 2 | 1 / 0 / 2 | ~50 s |
+
+#### 5. Run the ablation harness
 
 ```python
 from graphrag.models.ablation import AblationHarness
@@ -231,6 +442,13 @@ print(f"Jev:  {result['jev']['score']:.3f}  @ {result['jev']['latency_ms']:.0f}m
 print(f"Δ:    {result['delta']:.4f}")
 ```
 
+### What Laya can and can't judge
+
+Laya is a System One decision model. It judges the **state you give it**, and it has no world knowledge of its own. In practice that means:
+- **Verify edges against their source text** (`EdgeVerifier.verify_against_source`), not in isolation. Asked "is *Newton → born in → Woolsthorpe* valid?" without evidence, Laya scores it about the same as *Newton → baked → Banana Bread*. Given the source chunk, it separates them cleanly (0.996 vs 0.000).
+- **Evidence checks catch unsupported entities, not every wrong relation.** A triple whose target never appears in the source (`born in Paris`, P≈0.01) is rejected. A wrong relation between two entities that are both in the source (`Marie Curie invented Warsaw`, P≈0.98) can slip through.
+- **Treat thresholds as tunable.** The model card flags the probabilities as over-confident and not yet calibrated. Adjust `BFS_PRUNE_THRESHOLD`, `SEED_FINAL_TOP_K` and the gate/citation thresholds in `graphrag/retrieval/post_traversal.py` against your own data.
+
 ---
 
 ## 📁 Project Structure
@@ -240,14 +458,14 @@ graphrag_neo4j_laya/
 ├── graphrag/
 │   ├── graph/                    # DB abstraction layer
 │   │   ├── base.py               # BaseGraphClient ABC
-│   │   ├── factory.py            # GRAPH_DB_BACKEND selector
+│   │   ├── factory.py            # GRAPH_DB_TYPE selector
 │   │   ├── neo4j_client.py       # Neo4j (Bolt + GDS)
 │   │   ├── memgraph_client.py    # Memgraph (Bolt)
 │   │   ├── age_client.py         # Apache AGE (PostgreSQL)
 │   │   └── kuzu_client.py        # Kùzu (embedded)
 │   ├── models/                   # AI decision layer
 │   │   ├── base_decision.py      # BaseDecisionModel ABC (Score/Noul/Choice)
-│   │   ├── laya.py               # Local CUDA model (421M params)
+│   │   ├── laya.py               # Local Laya model via the `laya` package
 │   │   ├── jev.py                # TypeSafe Jev API client
 │   │   ├── ablation.py           # Side-by-side comparison harness
 │   │   └── decision_factory.py   # DECISION_MODEL_BACKEND selector
@@ -270,6 +488,9 @@ graphrag_neo4j_laya/
 │   │   ├── greedy_vs_astar.py    # Search strategy comparison
 │   │   └── vram_monitor.py       # GPU memory tracking
 │   └── pipeline.py               # Full end-to-end orchestrator
+├── examples/
+│   ├── laya_kuzu_quickstart.py   # End-to-end demo: Laya + Kùzu, no Docker
+│   └── data/science_history.json # Demo dataset (documents, triples, schema, queries)
 ├── config/
 │   ├── settings.py               # Pydantic settings (all thresholds)
 │   └── .env.example              # Template with all toggles
@@ -319,6 +540,6 @@ Contributions welcome:
 Licensed under the Apache 2.0 License.
 
 Built on:
-- [Laya](https://huggingface.co/convaiinnovations/laya-typed-decisions) (Apache 2.0, ModernBERT-large)
+- [Laya](https://huggingface.co/convaiinnovations/laya) (Apache 2.0, mmBERT / ModernBERT)
 - [TypeSafe Jev API](https://typesafe.ai)
 - [Neo4j](https://neo4j.com) · [Memgraph](https://memgraph.com) · [Apache AGE](https://age.apache.org) · [Kùzu](https://kuzudb.com)

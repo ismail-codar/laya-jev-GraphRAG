@@ -89,13 +89,14 @@ class OntologyAligner:
         str
             The canonical relationship type key (e.g. "EMPLOYED_BY").
         """
-        context = (
-            f"Raw relationship string: \"{raw_rel_type}\"."
-            + (f"\nSource entity: {source}." if source else "")
-            + (f"\nTarget entity: {target}." if target else "")
-        )
+        # Sentence form ("A wrote B.") gives the decision model the relation in
+        # context; it maps far fewer edges to the RELATED_TO fallback.
+        if source and target:
+            context = f"{source} {raw_rel_type} {target}."
+        else:
+            context = f"Raw relationship string: \"{raw_rel_type}\"."
         instruction = (
-            "Which canonical graph relationship type best matches this raw relationship string? "
+            f"Which relationship type best describes '{raw_rel_type}'? "
             "Pick the most semantically precise option."
         )
         try:

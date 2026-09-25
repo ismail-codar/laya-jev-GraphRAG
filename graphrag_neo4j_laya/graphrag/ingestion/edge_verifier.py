@@ -62,6 +62,25 @@ class EdgeVerifier:
         instruction = "Is this a logically valid and meaningful relationship between these two entities?"
         return self._laya.score(context, instruction)
 
+    def verify_against_source(
+        self, source: str, rel_type: str, target: str, source_text: str
+    ) -> float:
+        """
+        P(yes) that *source_text* (the chunk the triple was extracted from)
+        actually supports the edge (Noul primitive).
+
+        Prefer this over `_score_edge` whenever the source chunk is known: a
+        decision model judges the state it is given and has no world knowledge
+        of its own, so grounding the check in the source text is what lets it
+        catch hallucinated extractions.
+        """
+        context = (
+            f"Source text: {source_text}\n\n"
+            f"Extracted relationship: {source} -[{rel_type}]-> {target}"
+        )
+        instruction = "Does the source text explicitly support this extracted relationship?"
+        return self._laya.noul(context, instruction)
+
     def _fetch_all_edges(self, limit: int = 10_000) -> list[dict[str, Any]]:
         # This is a bit tricky: Kuzu uses self.conn, Neo4j/AGE/Memgraph use _driver or _cursor
         # For full abstraction, we should probably add `execute_query` to BaseGraphClient.
@@ -84,9 +103,12 @@ class EdgeVerifier:
                     rows = cur.fetchall()
                     edges = [{"source": str(r["source"]).strip('"'), "target": str(r["target"]).strip('"'), "rel_type": str(r["rel_type"]).strip('"')} for r in rows]
             except AttributeError:
-                # Kuzu
-                query = _ALL_EDGES_QUERY.replace("$limit", "$limit") # Kuzu supports parameters
-                results = self._db.conn.execute(query, parameters={"limit": limit})
+                # Kuzu — single RELATES_TO table, the semantic type lives in r.type
+                query = (
+                    "MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity) "
+                    f"RETURN a.name, b.name, r.type LIMIT {int(limit)}"
+                )
+                results = self._db.conn.execute(query)
                 while results.has_next():
                     row = results.get_next()
                     edges.append({"source": row[0], "target": row[1], "rel_type": row[2]})

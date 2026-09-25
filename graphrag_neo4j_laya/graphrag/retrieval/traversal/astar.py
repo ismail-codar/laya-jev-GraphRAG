@@ -45,6 +45,7 @@ class _FrontierNode:
     depth:     int = field(compare=False)
     path:      list[str] = field(compare=False, default_factory=list)
     score:     float = field(compare=False, default=0.0)
+    edges:     list[str] = field(compare=False, default_factory=list)  # edge type per hop
 
 
 class LayaGraphNavigator:
@@ -87,8 +88,8 @@ class LayaGraphNavigator:
         Context encodes the traversal state; instruction encodes the query goal.
         (Exact formulation from idea.md §4.)
         """
-        context     = f"Node: {current_node}. Edge: {edge['type']}. Target: {edge['target_name']}."
-        instruction = f"Score relevance to: '{user_query}'"
+        context     = f"Fact: {current_node} {edge['type']} {edge['target_name']}."
+        instruction = f"How relevant is this fact to answering: '{user_query}'"
         return self._laya.score(context, instruction)
 
     def _compute_f(
@@ -154,6 +155,7 @@ class LayaGraphNavigator:
             if current.depth >= max_depth:
                 best_paths.append({
                     "path":  current.path,
+                    "edges": current.edges,
                     "score": current.score,
                     "depth": current.depth,
                 })
@@ -181,6 +183,7 @@ class LayaGraphNavigator:
                     )
                     best_paths.append({
                         "path":  current.path,
+                        "edges": current.edges,
                         "score": current.score,
                         "depth": current.depth,
                         "early_terminated": True,
@@ -192,6 +195,7 @@ class LayaGraphNavigator:
                 # Dead end — treat as terminal
                 best_paths.append({
                     "path":  current.path,
+                    "edges": current.edges,
                     "score": current.score,
                     "depth": current.depth,
                 })
@@ -225,6 +229,7 @@ class LayaGraphNavigator:
                         depth=new_depth,
                         path=current.path + [target],
                         score=f_n,
+                        edges=current.edges + [edge["type"]],
                     ),
                 )
 

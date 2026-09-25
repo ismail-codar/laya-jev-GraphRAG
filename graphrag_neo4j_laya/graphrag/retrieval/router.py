@@ -33,18 +33,12 @@ class QueryIntent(str, Enum):
 # Routing schema: keys are option labels, values are natural-language descriptions
 # Presented to the Choice primitive as the options dict.
 _ROUTE_OPTIONS: dict[str, str] = {
-    "local":     (
-        "Single entity lookup. The question asks about a specific directly-connected fact. "
-        "A single graph hop from one entity suffices."
-    ),
+    "local":     "The question asks about one specific fact of one entity.",
     "multi_hop": (
-        "Multi-hop reasoning chain. The question requires chaining multiple entities across "
-        "several hops to reach an answer (e.g., cause-of-cause, influence chains)."
+        "The question asks how two or more entities are connected, "
+        "requiring a chain of facts."
     ),
-    "global":    (
-        "Broad summary or overview. The question asks for a thematic comparison, aggregation, "
-        "or high-level synthesis across the entire knowledge graph."
-    ),
+    "global":    "The question asks for a broad summary or overview of a whole topic.",
 }
 
 _ROUTE_INSTRUCTION = (

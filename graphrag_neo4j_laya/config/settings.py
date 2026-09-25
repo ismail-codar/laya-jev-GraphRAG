@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     age_password: str = Field("testpassword")
     age_database: str = Field("graph_db")
 
+    # ── Kùzu (embedded) ──────────────────────────────────────────────────────
+    kuzu_db_path: str = Field("./kuzu_db", description="On-disk path of the embedded Kùzu database")
+
     # ── Decision Model Backend ────────────────────────────────────────────────
     decision_model_backend: str = Field(
         "laya",
@@ -69,15 +72,23 @@ class Settings(BaseSettings):
 
     # ── Model IDs ─────────────────────────────────────────────────────────────
     laya_model_id: str = Field(
-        "convaiinnovations/laya-typed-decisions",
-        description="HuggingFace model ID for the Laya typed-decisions classifier",
+        "convaiinnovations/laya",
+        description="HuggingFace repo ID of the Laya decision model",
+    )
+    laya_model_subfolder: str = Field(
+        "multilingual",
+        description="Checkpoint inside the Laya repo: 'multilingual' | '' (English) | 'typed-decisions'",
+    )
+    laya_device: str | None = Field(
+        None,
+        description="Force a device for Laya ('cuda' | 'cpu'); auto-detected when empty",
     )
     llm_model_id: str = Field(
         "hugging-quants/Meta-Llama-3.1-8B-Instruct-BNB-NF4",
         description="Pre-quantized Llama-3.1 8B NF4 model ID",
     )
     embed_model_id: str = Field(
-        "sentence-transformers/all-MiniLM-L6-v2",
+        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         description="Sentence-Transformers model for first-pass node embedding",
     )
     huggingface_token: str | None = Field(

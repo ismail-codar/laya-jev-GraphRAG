@@ -40,6 +40,14 @@ class BaseGraphClient(ABC):
         """Create or update a node. The `name` property is the unique key."""
         pass
 
+    def get_node_text(self, name: str) -> str:
+        """
+        Return a human-readable description of *name* for context building.
+        Backends that store a `description` property override this; the
+        default falls back to the node name itself.
+        """
+        return name
+
     @abstractmethod
     def set_embedding(self, name: str, embedding: list[float]) -> None:
         """Store a pre-computed embedding vector on a node."""

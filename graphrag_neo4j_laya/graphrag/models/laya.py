@@ -1,11 +1,16 @@
 """
 graphrag/models/laya.py
 
-Thin, singleton-aware wrapper around the Laya typed-decisions classifier.
+Thin, singleton-aware wrapper around the Laya System One decision model,
+loaded through the official `laya` package (`pip install laya`).
 
-Model:  convaiinnovations/laya-typed-decisions
-        Apache 2.0 · ModernBERT-large backbone · 421M params
-        ~1.2 GB VRAM in FP16 on CUDA
+Default checkpoint: convaiinnovations/laya  (subfolder: multilingual)
+        Apache 2.0 · mmBERT-base backbone · 322M params · 100+ languages
+        Runs on CUDA when available, otherwise CPU.
+
+Other checkpoints (set LAYA_MODEL_SUBFOLDER in .env):
+        ""                → English, ModernBERT-large, 421M
+        "typed-decisions" → English specialist (4 synthetic workflows)
 
 All three decision primitives are implemented:
 
@@ -20,54 +25,48 @@ S_Laya formula (idea.md §2.1):
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
+from collections import defaultdict
 from functools import lru_cache
 from typing import Any
-
-import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from config.settings import settings
 from .base_decision import BaseDecisionModel, DecisionResult
 
 logger = logging.getLogger(__name__)
 
-# ── Label weight maps ─────────────────────────────────────────────────────────
-# Score primitive — three-class
-_SCORE_WEIGHTS = {"irrelevant": 0.0, "tangential": 0.5, "critical": 1.0}
-# Noul primitive — binary
-_NOUL_WEIGHTS  = {"false": 0.0, "no": 0.0, "true": 1.0, "yes": 1.0,
-                  "irrelevant": 0.0, "tangential": 0.0, "critical": 1.0}
+# transformers probes for TensorFlow at import; its abseil runtime can deadlock
+# Laya model construction (see the Laya model card).
+os.environ.setdefault("USE_TF", "0")
+
+# ── Score levels (ordinal, low → high) ────────────────────────────────────────
+# Laya returns the expected level index in [0, n-1]; normalising by (n-1) gives
+# exactly S_Laya = P(critical)·1.0 + P(tangential)·0.5 + P(irrelevant)·0.0
+_SCORE_CRITERIA = ["irrelevant", "tangential", "critical"]
 
 
-def _apply_score_weights(probs: torch.Tensor, id2label: dict[int, str]) -> tuple[float, float, dict[str, float]]:
-    """Compute (score, confidence, raw_probs) from a softmax tensor."""
-    total = 0.0
-    raw: dict[str, float] = {}
-    for idx, label in id2label.items():
-        p = probs[idx].item()
-        raw[label] = round(p, 4)
-        w = _SCORE_WEIGHTS.get(label, _NOUL_WEIGHTS.get(label, 0.0))
-        total += w * p
-    return float(total), float(probs.max().item()), raw
+def _score_question(instruction: str) -> dict[str, Any]:
+    return {"type": "score", "instructions": instruction, "criteria": _SCORE_CRITERIA}
 
 
-def _apply_noul_weights(probs: torch.Tensor, id2label: dict[int, str]) -> tuple[float, float, dict[str, float]]:
-    """P(yes) = P(critical) + 0.5·P(tangential) for three-class; P(yes) for binary."""
-    total = 0.0
-    raw: dict[str, float] = {}
-    for idx, label in id2label.items():
-        p = probs[idx].item()
-        raw[label] = round(p, 4)
-        w = _NOUL_WEIGHTS.get(label, 0.0)
-        total += w * p
-    return float(total), float(probs.max().item()), raw
+def _noul_question(instruction: str) -> dict[str, Any]:
+    return {"type": "noul", "instructions": instruction}
+
+
+def _choice_question(instruction: str, options: dict[str, str]) -> dict[str, Any]:
+    return {"type": "choice", "instructions": instruction, "criteria": options}
+
+
+def _normalise_score(answer: dict[str, Any]) -> float:
+    levels = max(len(answer.get("legend", _SCORE_CRITERIA)) - 1, 1)
+    return min(max(float(answer["score"]) / levels, 0.0), 1.0)
 
 
 class LayaModel(BaseDecisionModel):
     """
-    Singleton wrapper for the Laya typed-decisions classifier.
+    Singleton wrapper for the Laya decision model.
     Thread-safe: the internal lock prevents duplicate model loads.
     """
 
@@ -89,130 +88,130 @@ class LayaModel(BaseDecisionModel):
         self._load()
 
     def _load(self) -> None:
-        model_id = settings.laya_model_id
-        logger.info("Loading Laya model: %s", model_id)
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        if self.device == "cpu":
-            logger.warning("CUDA not available — Laya will run on CPU (slow).")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
-        self.model = AutoModelForSequenceClassification.from_pretrained(
-            model_id,
-            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-        ).to(self.device)
-        self.model.eval()
-        self._id2label: dict[int, str] = {
-            int(k): v.lower() for k, v in self.model.config.id2label.items()
-        }
-        logger.info("Laya ready on %s | labels: %s", self.device, list(self._id2label.values()))
+        import laya  # noqa: PLC0415 — heavy import, deferred until first use
 
-    # ── Internal tokenise + forward ───────────────────────────────────────────
-
-    @torch.inference_mode()
-    def _forward(self, context: str, text_pair: str) -> tuple[torch.Tensor, float]:
-        """Tokenise, run forward pass, return (softmax_probs, latency_ms)."""
-        inputs = self.tokenizer(
-            context, text_pair=text_pair,
-            return_tensors="pt", truncation=True, max_length=512, padding=True,
-        ).to(self.device)
+        model_id  = settings.laya_model_id
+        subfolder = settings.laya_model_subfolder or None
+        device    = settings.laya_device or None
+        logger.info("Loading Laya model: %s (subfolder=%s)", model_id, subfolder)
         t0 = time.perf_counter()
-        outputs = self.model(**inputs)
+        self.agent = laya.load(
+            model_id,
+            subfolder=subfolder,
+            device=device,
+            token=settings.huggingface_token or None,
+        )
+        logger.info("Laya ready in %.1fs", time.perf_counter() - t0)
+
+    # ── Internal predict ──────────────────────────────────────────────────────
+
+    def _predict(self, context: str, questions: dict[str, dict]) -> tuple[dict[str, Any], float]:
+        """Run one parallel forward pass; return (answers, latency_ms)."""
+        t0 = time.perf_counter()
+        result = self.agent.predict(context, questions)
         latency_ms = (time.perf_counter() - t0) * 1000
-        probs = torch.softmax(outputs.logits, dim=1)[0]
-        return probs, latency_ms
+        return result["answers"], latency_ms
+
+    def _to_result(self, answer: dict[str, Any], latency_ms: float) -> DecisionResult:
+        kind = answer["type"]
+        if kind == "score":
+            value = _normalise_score(answer)
+            raw   = {_SCORE_CRITERIA[int(k)]: v for k, v in answer["probabilities"].items()}
+            selected = None
+        elif kind == "noul":
+            value = float(answer["noul"])
+            raw   = {"no": round(1.0 - value, 4), "yes": round(value, 4)}
+            selected = None
+        else:
+            selected = answer["choice"]
+            raw   = dict(answer["probabilities"])
+            value = float(raw[selected])
+        return DecisionResult(
+            score=value,
+            confidence=float(answer.get("answer_confidence", answer.get("confidence", 0.0))),
+            raw_probs=raw,
+            latency_ms=round(latency_ms, 2),
+            backend="laya",
+            primitive=kind,
+            selected=selected,
+        )
 
     # ── Score Primitive ───────────────────────────────────────────────────────
 
     def score(self, context: str, instruction: str) -> float:
-        probs, _ = self._forward(context, instruction)
-        s, _, _ = _apply_score_weights(probs, self._id2label)
-        return s
+        answers, _ = self._predict(context, {"q": _score_question(instruction)})
+        return _normalise_score(answers["q"])
 
     def score_detailed(self, context: str, instruction: str) -> DecisionResult:
-        probs, latency_ms = self._forward(context, instruction)
-        s, conf, raw = _apply_score_weights(probs, self._id2label)
-        return DecisionResult(score=s, confidence=conf, raw_probs=raw,
-                              latency_ms=round(latency_ms, 2), backend="laya", primitive="score")
+        answers, latency_ms = self._predict(context, {"q": _score_question(instruction)})
+        return self._to_result(answers["q"], latency_ms)
 
     # ── Noul Primitive ────────────────────────────────────────────────────────
 
     def noul(self, context: str, instruction: str) -> float:
-        """P(yes) — maps P(critical) → yes, P(irrelevant) → no."""
-        probs, _ = self._forward(context, instruction)
-        p, _, _ = _apply_noul_weights(probs, self._id2label)
-        return p
+        """P(yes) for a binary question about *context*."""
+        answers, _ = self._predict(context, {"q": _noul_question(instruction)})
+        return float(answers["q"]["noul"])
 
     def noul_detailed(self, context: str, instruction: str) -> DecisionResult:
-        probs, latency_ms = self._forward(context, instruction)
-        p, conf, raw = _apply_noul_weights(probs, self._id2label)
-        return DecisionResult(score=p, confidence=conf, raw_probs=raw,
-                              latency_ms=round(latency_ms, 2), backend="laya", primitive="noul")
+        answers, latency_ms = self._predict(context, {"q": _noul_question(instruction)})
+        return self._to_result(answers["q"], latency_ms)
 
     # ── Choice Primitive ──────────────────────────────────────────────────────
 
     def choice(self, context: str, instruction: str, options: dict[str, str]) -> str:
-        """
-        Zero-shot multi-class selection.
-        Scores each option description against the context+instruction
-        and returns the key with the highest score.
-        """
+        """Categorical selection — all options are scored in a single forward pass."""
         if not options:
             raise ValueError("choice() requires at least one option.")
-        best_key, best_score = "", -1.0
-        for key, description in options.items():
-            pair = f"{instruction}\n\nOption: {description}"
-            s = self.score(context, pair)
-            if s > best_score:
-                best_score, best_key = s, key
-        return best_key
+        answers, _ = self._predict(context, {"q": _choice_question(instruction, options)})
+        return answers["q"]["choice"]
 
     def choice_detailed(
         self, context: str, instruction: str, options: dict[str, str]
     ) -> DecisionResult:
         if not options:
             raise ValueError("choice_detailed() requires at least one option.")
-        scores: dict[str, float] = {}
-        t0 = time.perf_counter()
-        for key, description in options.items():
-            pair = f"{instruction}\n\nOption: {description}"
-            scores[key] = self.score(context, pair)
-        latency_ms = (time.perf_counter() - t0) * 1000
+        answers, latency_ms = self._predict(context, {"q": _choice_question(instruction, options)})
+        return self._to_result(answers["q"], latency_ms)
 
-        best_key = max(scores, key=scores.__getitem__)
-        # Normalise scores to a probability distribution
-        total = sum(scores.values()) or 1.0
-        raw_probs = {k: round(v / total, 4) for k, v in scores.items()}
+    # ── Multi-question (one forward pass) ─────────────────────────────────────
 
-        return DecisionResult(
-            score=scores[best_key],
-            confidence=scores[best_key] / total,
-            raw_probs=raw_probs,
-            latency_ms=round(latency_ms, 2),
-            backend="laya",
-            primitive="choice",
-            selected=best_key,
-        )
+    def ask_batch(self, state: str, questions: dict[str, dict]) -> dict[str, DecisionResult]:
+        laya_questions: dict[str, dict] = {}
+        for name, spec in questions.items():
+            q_type = spec["type"]
+            instruction = spec.get("instruction", "")
+            if q_type == "score":
+                laya_questions[name] = _score_question(instruction)
+            elif q_type == "noul":
+                laya_questions[name] = _noul_question(instruction)
+            elif q_type == "choice":
+                laya_questions[name] = _choice_question(instruction, spec.get("options", {}))
+            else:
+                raise ValueError(f"Unknown question type: {q_type!r}")
+        answers, latency_ms = self._predict(state, laya_questions)
+        return {name: self._to_result(answers[name], latency_ms) for name in questions}
 
-    # ── Batch Score (GPU-optimised) ───────────────────────────────────────────
+    # ── Batch Score ───────────────────────────────────────────────────────────
 
     def batch_score(
         self,
         pairs: list[tuple[str, str]],
         batch_size: int = 16,
     ) -> list[float]:
-        results: list[float] = []
-        for i in range(0, len(pairs), batch_size):
-            chunk = pairs[i : i + batch_size]
-            contexts, instructions = zip(*chunk)
-            inputs = self.tokenizer(
-                list(contexts), text_pair=list(instructions),
-                return_tensors="pt", truncation=True, max_length=512, padding=True,
-            ).to(self.device)
-            with torch.inference_mode():
-                outputs = self.model(**inputs)
-                probs_batch = torch.softmax(outputs.logits, dim=1)
-            for row in probs_batch:
-                s, _, _ = _apply_score_weights(row, self._id2label)
-                results.append(s)
+        """Score many pairs; pairs sharing an instruction share forward passes."""
+        results: list[float] = [0.0] * len(pairs)
+        by_instruction: dict[str, list[int]] = defaultdict(list)
+        for i, (_, instruction) in enumerate(pairs):
+            by_instruction[instruction].append(i)
+        for instruction, idxs in by_instruction.items():
+            outputs = self.agent.predict_batch(
+                [pairs[i][0] for i in idxs],
+                {"q": _score_question(instruction)},
+                batch_size=batch_size,
+            )
+            for i, out in zip(idxs, outputs):
+                results[i] = _normalise_score(out["answers"]["q"])
         return results
 
 

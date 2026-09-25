@@ -12,6 +12,9 @@ bitsandbytes>=0.43.0
 huggingface-hub>=0.23.0
 sentence-transformers>=3.0.0
 
+# ── Laya (local System One decision model) ────────────────────────────────────
+laya>=0.3.20
+
 # ── Graph Databases ───────────────────────────────────────────────────────────
 # Neo4j and Memgraph (Bolt protocol)
 neo4j>=5.20.0

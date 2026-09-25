@@ -32,6 +32,10 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# Weight of the dense cosine score when blending it with the decision-model
+# score; the blend is steadier than either signal alone.
+_DENSE_WEIGHT = 0.5
+
 
 @lru_cache(maxsize=1)
 def _get_embedder() -> SentenceTransformer:
@@ -66,6 +70,8 @@ class SeedSelector:
         """Return top-N nodes from the Graph DB vector index."""
         query_vec = self._embed_query(query)
         candidates = self._db.vector_search(query_vec, top_k=self._top_n)
+        for cand in candidates:
+            cand.setdefault("text", self._db.get_node_text(cand["name"]))
         logger.debug("Dense retrieval: %d candidates", len(candidates))
         return candidates
 
@@ -95,6 +101,7 @@ class SeedSelector:
             context = f"Entity: {cand.get('name', '')}. Description: {cand.get('text', cand.get('name', ''))}"
             try:
                 s = model.score(context, instruction)
+                s = _DENSE_WEIGHT * cand.get("score", 0.0) + (1.0 - _DENSE_WEIGHT) * s
                 scored.append((s, cand))
             except Exception as e:
                 logger.warning("Score evaluation failed for %s: %s", cand.get("name"), e)

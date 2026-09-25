@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 import networkx as nx
 
+from config.settings import settings
 from .base import BaseGraphClient
 
 try:
@@ -23,9 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 class KuzuClient(BaseGraphClient):
-    def __init__(self, db_path: str = "./kuzu_db") -> None:
+    def __init__(self, db_path: str | None = None) -> None:
         if kuzu is None:
             raise ImportError("Kuzu is not installed. Run `pip install kuzu`")
+        db_path = db_path or settings.kuzu_db_path
         self.db = kuzu.Database(db_path)
         self.conn = kuzu.Connection(self.db)
         logger.info("Kùzu embedded database connected at %s", db_path)
@@ -40,7 +42,7 @@ class KuzuClient(BaseGraphClient):
 
     def create_schema(self) -> None:
         try:
-            self.conn.execute("CREATE NODE TABLE Entity(name STRING, pagerank DOUBLE, communityId INT64, PRIMARY KEY (name))")
+            self.conn.execute("CREATE NODE TABLE Entity(name STRING, description STRING, pagerank DOUBLE, communityId INT64, PRIMARY KEY (name))")
             self.conn.execute("CREATE REL TABLE RELATES_TO(FROM Entity TO Entity, type STRING)")
             logger.info("Kùzu schema created.")
         except RuntimeError as e:
@@ -53,6 +55,22 @@ class KuzuClient(BaseGraphClient):
         # Kuzu's MERGE syntax
         query = "MERGE (n:Entity {name: $name})"
         self.conn.execute(query, parameters={"name": name})
+        description = (properties or {}).get("description")
+        if description:
+            self.conn.execute(
+                "MATCH (n:Entity {name: $name}) SET n.description = $description",
+                parameters={"name": name, "description": description},
+            )
+
+    def get_node_text(self, name: str) -> str:
+        results = self.conn.execute(
+            "MATCH (n:Entity {name: $name}) RETURN n.description", parameters={"name": name}
+        )
+        if results.has_next():
+            description = results.get_next()[0]
+            if description:
+                return description
+        return name
 
     def set_embedding(self, name: str, embedding: list[float]) -> None:
         self._embeddings[name] = np.array(embedding, dtype=np.float32)
