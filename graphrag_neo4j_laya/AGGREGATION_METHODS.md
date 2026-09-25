@@ -213,6 +213,55 @@ db.top_by_degree(rel_type=None, k=3)
 # → [{"name": "Isaac Newton", "degree": 4}, {"name": "General Relativity", "degree": 3}, ...]
 ```
 
+### Örnek: çok seviyeli, çok metrikli agregasyon
+
+```cypher
+MATCH (s:Entity)-[r:RELATES_TO]->(t:Entity)
+RETURN
+    s.communityId            AS Community,        // seviye 1
+    s.name                   AS Subject,          // seviye 2
+    r.type                   AS RelationType,     // seviye 3
+
+    SUM(t.pagerank)          AS TotalTargetRank,  // SUM(Amount)
+    COUNT(*)                 AS EdgeCount,        // COUNT(*)
+    AVG(t.pagerank)          AS AvgTargetRank,    // AVG(UnitPrice)
+    MIN(t.pagerank)          AS MinTargetRank,    // MIN(UnitPrice)
+    MAX(t.pagerank)          AS MaxTargetRank,    // MAX(UnitPrice)
+    COUNT(DISTINCT t.name)   AS DistinctTargets   // SUM(Quantity) — sonda olmalı, aşağıya bakın
+ORDER BY Community, Subject, RelationType;
+```
+
+Cypher'da `GROUP BY` yok. `RETURN` içindeki toplama dışı alanlar (`Community`, `Subject`, `RelationType`) otomatik olarak gruplama anahtarı olur.
+
+> **Kùzu 0.11.3 hatası:** `COUNT(DISTINCT ...)` listede başka agregasyonlardan önce gelirse, ondan sonraki tüm agregasyonlar sessizce `0` / `NULL` döner (hata yok). DISTINCT agregasyonu en sona koymak geçici çözüm. Bir `group_edges` şablonu yazılırsa bu sıralamayı kendisi zorlamalı.
+
+Sonuçlar, quickstart'ın ürettiği `examples/.kuzu_demo` üzerinde çalıştırıldı (pagerank 4 haneye yuvarlandı):
+
+| Community | Subject | RelationType | TotalTargetRank | EdgeCount | Avg | Min | Max | DistinctTargets |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | Albert Einstein | BORN_IN | 0.0764 | 1 | 0.0764 | 0.0764 | 0.0764 | 1 |
+| 0 | Albert Einstein | DISCOVERED (*) | 0.0764 | 1 | 0.0764 | 0.0764 | 0.0764 | 1 |
+| 0 | General Relativity | EXPLAINS | 0.0753 | 1 | 0.0753 | 0.0753 | 0.0753 | 1 |
+| 0 | General Relativity | EXTENDS | 0.1306 | 1 | 0.1306 | 0.1306 | 0.1306 | 1 |
+| 0 | General Relativity | PREDICTED | 0.1209 | 1 | 0.1209 | 0.1209 | 0.1209 | 1 |
+| 0 | Gottfried Leibniz | DEVELOPED | 0.1106 | 1 | 0.1106 | 0.1106 | 0.1106 | 1 |
+| 0 | Isaac Newton | AUTHORED | 0.0650 | 1 | 0.0650 | 0.0650 | 0.0650 | 1 |
+| 0 | Isaac Newton | BORN_IN (*) | 0.1757 | 2 | 0.0878 | 0.0650 | 0.1106 | 2 |
+| 0 | Isaac Newton | LEADS | 0.0650 | 1 | 0.0650 | 0.0650 | 0.0650 | 1 |
+| 0 | LIGO | DISCOVERED | 0.1209 | 1 | 0.1209 | 0.1209 | 0.1209 | 1 |
+| 0 | Principia Mathematica | RELATED_TO | 0.1306 | 1 | 0.1306 | 0.1306 | 0.1306 | 1 |
+
+(*) Hizalama hataları: Einstein → General Relativity `DEVELOPED` yerine `DISCOVERED`, Newton → Calculus ise `DEVELOPED` yerine `BORN_IN` olarak hizalanmış. Bu yüzden Newton'un `BORN_IN` grubunda iki hedef (Woolsthorpe, Calculus) var. "introduced the law of" `RELATED_TO`'ya düştü.
+
+Çıkarımlar:
+
+- **Seviye 1 tek grup.** Topluluk tespiti WCC; graph `Universal Gravitation` üzerinden tek parça bağlı olduğu için tüm kenarlar `communityId = 0`. `Banana Bread` düğümü kenarı budandığı hâlde tabloda kalıyor ve `communityId`/`pagerank` değeri `NULL`; `MATCH ...-[r]->...` onu zaten dışarıda bırakıyor.
+- **Küçük veride 3 seviye dejenere oluyor.** 11 gruptan 10'unda tek kenar var, `AVG = MIN = MAX`. Metriklerin ayrıştığı tek grup Newton/`BORN_IN` ve o da bir hizalama hatasından kaynaklanıyor.
+- **Agregasyon, hizalama hatalarını görünür kılıyor.** Aynı özne için `BORN_IN` altında `DistinctTargets > 1` çıkması (bir kişi tek yerde doğar) iyi bir veri kalitesi kontrolü. Kardinalitesi 1 olması beklenen ilişki türleri için bu sorgu bir sağlık kontrolüne dönüştürülebilir.
+- **Roll-up, bir seviyeyi `RETURN`'den çıkarmakla yapılır.** Community + Subject seviyesinde Newton `EdgeCount=4`, General Relativity 3, Einstein 2. Community + RelationType seviyesinde `BORN_IN=3`, `DISCOVERED=2`, diğerleri 1. Yalnız Community seviyesinde tek grup, 12 kenar.
+- **Daha anlamlı bir metrik hesaplanıyor ama saklanmıyor.** Laya'nın kenar doğrulama skoru (`P`, `examples/laya_kuzu_quickstart.py:90`) hesaplanıyor, fakat `upsert_edge` bu skoru kenara yazmıyor. `RELATES_TO` tablosuna bir `support DOUBLE` kolonu eklenirse `AVG(r.support)` / `MIN(r.support)` "hangi özne/ilişki grubunun kanıtı en zayıf" sorusunu cevaplayabilir.
+- **Şablona dönüştürülebilir.** Gruplama anahtarları sabit bir whitelist'ten seçilirse (`communityId`, `name`, `type`), bu sorgu `aggregate_edges` ile aynı güvenlik modeline sahip bir `group_edges(keys, metrics)` şablonu olur.
+
 ### Açık bir veri sorunu: varlık türü yok
 
 "Kaç fizikçi var?" ya da "kaç teori var?" sorularını hiçbir şablon cevaplayamaz, çünkü şema düğüm türü tutmuyor. Tüm düğümler `Entity` etiketli ve bir tür property'si yok. Bunu çözmenin iki yolu var:
