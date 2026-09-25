@@ -2,12 +2,13 @@
 
 > Tarih: 2026-09-25 · Durum: karar dokümanı (henüz implementasyon yok)
 
-Pipeline şu an "kaç tane", "en çok", "hepsini listele" gibi agregasyon sorularına güvenilir cevap veremiyor. Bu doküman dört çözüm yöntemini örneklerle anlatıyor ve aralarında seçim yapmayı kolaylaştırıyor.
+Pipeline şu an "kaç tane", "en çok", "hepsini listele" gibi agregasyon sorularına güvenilir cevap veremiyor. Bu doküman beş çözüm yöntemini örneklerle anlatıyor ve aralarında seçim yapmayı kolaylaştırıyor. Yöntem 5, üç dış Jev projesinin incelenmesinden çıktı (bkz. dokümanın sonundaki Ek).
 
-Dört yöntem birbirinin alternatifi değil:
+Beş yöntem birbirinin alternatifi değil:
 
 - **1, 2 ve 3 aynı zincirin halkalarıdır.** Tek başına hiçbiri işe yaramaz. Asıl seçim, zincirin ne kadarını kuracağımız.
 - **4 başka bir soru tipini çözer:** tematik ve genel sorular. Kesin sayım yapmaz.
+- **5, şablonların ifade edemediği filtreleri çözer:** "kaç teori var", "hangileri fizikle ilgili". Yöntem 2'nin üstüne eklenen bir ara adımdır; sonucu güven aralığıyla verir.
 
 Tüm örnekler quickstart verisini kullanıyor: `examples/data/science_history.json`, 14 varlık ve 14 triple. Bunlardan 2 triple kasıtlı olarak yanlış ve edge verification sırasında budanıyor ("Newton baked Banana Bread", "LIGO was born in Ulm"). Sayımlar kalan 12 kenara göre verildi.
 
@@ -219,7 +220,9 @@ db.top_by_degree(rel_type=None, k=3)
 - **Ingestion'da tür yazmak.** `entity_extractor.py` zaten NER yapıyor; çıkan türü `entity_type` property'si olarak yazmak. Tür kümesi kapalı tutulursa sınıflandırma yine `Choice` ile yapılabilir.
 - **Sadece ilişki üzerinden sormak.** "Kaç kişi bir şey geliştirdi?" sorusu şu anki şemayla da cevaplanabilir: `DEVELOPED` kenarlarının kaynaklarını saymak yeterli.
 
-Önerilen: ilk sürüm ikinci yolla sınırlı kalsın. Tür yazmak ayrı bir iş olarak planlansın.
+- **Sorgu anında sınıflandırmak.** Adayları DB'den çekip her birine Laya ile "bu bir teori mi?" diye sormak. Bu, Yöntem 5.
+
+Önerilen: ilk sürüm ikinci yolla sınırlı kalsın. Tür soruları için önce Yöntem 5 denensin. Ingestion'da tür yazmak, Yöntem 5 yavaş kalırsa planlansın.
 
 ### Riskler
 
@@ -366,7 +369,133 @@ for cid, members in communities.items():
 
 ---
 
-## 6. Karşılaştırma
+## 6. Yöntem 5: Aday listesi DB'den, karar Laya'dan, sayım koddan
+
+### Fikrin kaynağı
+
+[gbesse/jev-extract](https://github.com/gbesse/jev-extract) şu kuralla çalışıyor (`docs/design.md`):
+
+> The model only selects among code-generated values. This avoids asking a classifier to generate dates, count, or do arithmetic.
+
+Yani adayları kod üretiyor, model sadece aday başına karar veriyor, birleştirmeyi (`first`, `any`, `all`, `max_probability`, `majority`) yine kod yapıyor. Bu repodaki agregasyon problemine birebir uyuyor. Laya bir System One sınıflandırıcısı: sayamaz, ama "bu öğe koşulu sağlıyor mu?" sorusunu iyi cevaplar.
+
+### Ne yapar
+
+Yöntem 2'nin ifade edemediği, **anlamsal filtre gerektiren** agregasyon sorularını çözer:
+
+- "Graph'ta kaç teori var?" (şemada tür yok)
+- "Newton'un ilişkilerinden hangileri bilimsel bir çalışma?"
+- "Kütleçekimiyle ilgili kaç varlık var?"
+
+Şema değişikliği gerektirmez. Tür bilgisi, sorgu anında Laya ile üretilir.
+
+### Nasıl çalışır
+
+```mermaid
+flowchart LR
+    Q[Soru] --> P[Filtre cümlesi<br/>ör. 'is a scientific theory']
+    P --> C[Aday listesi<br/>DB: tüm düğümler<br/>veya şablon sonucu]
+    C --> N[Aday başına<br/>1 × Noul]
+    N --> B[Bantlara ayır<br/>evet / belirsiz / hayır]
+    B --> A[Kodda say<br/>aralık + provenance]
+```
+
+1. **Filtre cümlesi.** Sorudan tek bir yüklem çıkarılır: "is a scientific theory". Bu serbest metin olduğu için Yöntem 1'deki `Choice` yeterli değil. İki seçenek var:
+    - Kapalı bir tür listesi (`person`, `theory`, `place`, `work`, `organisation`, …) tanımlayıp `Choice` ile seçmek. Güvenli ama dar.
+    - LLM'e yüklemi tek satır olarak çıkarttırmak. Esnek, ama LLM'e bağımlı.
+2. **Aday listesi (deterministik).** Adayları kod üretir, model üretmez:
+    - Anchor yoksa: tüm `Entity` düğümleri (yeni bir `list_entities()` metodu).
+    - Anchor varsa: Yöntem 2'nin `aggregate_edges` sonucu. Örneğin "Newton'un ilişkilerinden hangileri…" sorusunda Newton'un 4 kenarı.
+3. **Aday başına karar.** Her aday için tek bir `Noul` sorulur. Context'e sadece o adayın adı ve açıklaması girer. jev-extract README'si "Jev is sensitive to irrelevant state" uyarısını yapıyor; bu yüzden aday başına dar bir context tutulur.
+4. **Bantlara ayırma.** [SammySN-car/jev-deliberation-judge](https://github.com/SammySN-car/jev-deliberation-judge) tasarımındaki belirsizlik bandı kullanılır: `P ≥ 0.70` evet, `P ≤ 0.30` hayır, arası belirsiz.
+5. **Kodda sayım.** Cevap tek sayı yerine aralık olarak verilir: `[kesin_evet, kesin_evet + belirsiz]`. Her öğenin olasılığı provenance olarak saklanır.
+
+```python
+@dataclass
+class FilteredCount:
+    yes:       list[tuple[str, float]]
+    uncertain: list[tuple[str, float]]
+    no:        list[tuple[str, float]]
+
+    @property
+    def range(self) -> tuple[int, int]:
+        return len(self.yes), len(self.yes) + len(self.uncertain)
+
+def count_matching(db, predicate: str, candidates: list[str],
+                   lo: float = 0.30, hi: float = 0.70) -> FilteredCount:
+    model = get_decision_model()
+    out = FilteredCount([], [], [])
+    for name in candidates:
+        p = model.noul(f"Entity: {name}. Description: {db.get_node_text(name)}",
+                       f"Does this entity match: {predicate}?")
+        bucket = out.yes if p >= hi else out.no if p <= lo else out.uncertain
+        bucket.append((name, p))
+    return out
+```
+
+### Örnek: "Graph'ta kaç teori var?" (quickstart)
+
+Aşağıdaki olasılıklar **tahmini**; ölçülmedi. Amaç çıktının biçimini göstermek.
+
+| Aday | Beklenen P | Bant |
+| --- | --- | --- |
+| General Relativity | ~0.95 | evet |
+| Universal Gravitation | ~0.85 | evet |
+| Spacetime Curvature | ~0.50 | belirsiz |
+| Calculus | ~0.20 | hayır |
+| Isaac Newton, Ulm, LIGO, … | < 0.10 | hayır |
+
+Sonuç fact'i Yöntem 3'teki gibi context'e girer:
+
+```
+- Graph database aggregate: 14 entities checked. 2 match "is a scientific theory"
+  (General Relativity, Universal Gravitation); 1 uncertain (Spacetime Curvature).
+```
+
+Cevap: "Graph'ta 2 teori var; belirsiz 1 adayla birlikte 2–3." Tek bir kesin sayı söylemek yerine belirsizliği açıkça raporlar.
+
+### Dış repolardan alınan iki sağlamlaştırma
+
+**Çoklu çerçeve (framing) ve polarite dengesi.** Kaynak deliberation-judge. Aynı aday için yüklem iki farklı ifadeyle sorulur:
+
+- "Is this a scientific theory?"
+- "Is this something other than a scientific theory?" (sonuç ters çevrilerek okunur)
+
+İki çerçeve çelişirse aday belirsiz banda alınır. Gerekçe, deliberation-judge `REFERENCE.md` §7'deki gözlem: Laya'nın `Noul` cevabı bazen state'i değil, seçenek etiketinin ifadesini takip ediyor. Maliyet aday başına 2 çağrıya çıkar.
+
+**Tekrar değil, çerçeve çeşitliliği.** deliberation-judge tasarımı açıkça uyarıyor: Laya deterministik bir encoder. Aynı soruyu K kez sormak SD ≡ 0 verir, yani self-consistency Laya'da işe yaramaz. Çeşitlilik ancak farklı ifadelerden gelir.
+
+### Maliyet ve ölçek
+
+deliberation-judge'ın notuna göre bir Laya çağrısı ~33 ms sürüyor.
+
+| Aday sayısı | 1 çerçeve | 2 çerçeve |
+| --- | --- | --- |
+| 14 (quickstart) | ~0,5 s | ~1 s |
+| 1.000 | ~33 s | ~66 s |
+| 10.000 | ~5,5 dk | ~11 dk |
+
+Tüm düğümleri taramak ölçeklenmez. Büyük graph'ta adaylar önce daraltılmalı:
+
+- **Yapısal daraltma (tamlık korunur).** Örneğin "kaç kişi bir şey geliştirdi?" sorusunda sadece `DEVELOPED` kenarlarının kaynakları aday olur.
+- **Vektör ön filtresi (tamlık kaybolur).** `vector_search` ile en benzer top-N aday alınabilir. Ama bu durumda sayım bir alt sınırdır; cevap bunu "en az N" diye açıkça söylemeli.
+- **Önbellek.** Aynı yüklem ve aday için sonuç saklanabilir. jev-extract sonucu `hash(schema, text)` ile anahtarlıyor; burada `hash(predicate, node_name, node_text)` uygun.
+- **Tekrar eden yüklemler ingestion'a taşınır.** Aynı yüklem sık soruluyorsa, bu Yöntem 2'deki `entity_type` yazımına geçme sinyalidir.
+
+### Riskler
+
+- **Sınıflandırma hatası sayıya birikir.** Aday başına %5 hata, 1.000 adayda ~50 yanlış sayım demek. Aralık gösterimi belirsiz olanları yakalar, ama kendinden emin yanlışları yakalamaz.
+- **Kalibrasyon.** Model kartı Laya olasılıklarının aşırı emin ve kalibre edilmemiş olduğunu söylüyor. Bu yüzden 0.30 / 0.70 bantları başlangıç değeri; etiketli veride ayarlanmalı.
+- **Dil.** Yüklem ve açıklamalar aynı dilde olmalı. Türkçe yüklem İngilizce açıklamaya karşı diller arası eşleştirme sorununu yaşar (bkz. Yöntem 3, Dil kısıtı).
+
+### Artı / eksi
+
+- Artı: şema değişikliği yok; şablonların ifade edemediği filtreleri çözüyor; belirsizliği açıkça raporluyor; her öğe için provenance var; mevcut `Noul` primitive'iyle çalışıyor.
+- Eksi: aday sayısıyla doğrusal maliyet; sayım sınıflandırıcı kadar doğru; yüklem çıkarımı için ya kapalı bir tür listesi ya da LLM gerekiyor.
+
+---
+
+## 7. Karşılaştırma
 
 ### Yöntemler arası bağımlılık
 
@@ -374,32 +503,35 @@ for cid, members in communities.items():
 flowchart LR
     M1[Yöntem 1<br/>Router + parametre] --> M2[Yöntem 2<br/>DB şablonları]
     M2 --> M3[Yöntem 3<br/>Fact + citation]
+    M2 --> M5[Yöntem 5<br/>Aday + Noul + kodda sayım]
+    M5 --> M3
     M4[Yöntem 4<br/>Community özetleri]
 ```
 
-1 → 2 → 3 tek bir özelliktir; biri çıkarılırsa zincir kopar. Ancak 2 + 3, Yöntem 1 olmadan da denenebilir: `pipeline.query_aggregate(spec)` gibi açık bir API ile router'ı atlayarak. Yöntem 4 bağımsızdır.
+1 → 2 → 3 tek bir özelliktir; biri çıkarılırsa zincir kopar. Ancak 2 + 3, Yöntem 1 olmadan da denenebilir: `pipeline.query_aggregate(spec)` gibi açık bir API ile router'ı atlayarak. Yöntem 5, Yöntem 2'nin aday listesini filtreleyen bir ara adımdır ve sonucunu Yöntem 3'e verir. Yöntem 4 bağımsızdır.
 
 ### Tablo
 
-| Kriter | 1: Router | 2: DB şablonları | 3: Fact + citation | 4: Community özetleri |
-| --- | --- | --- | --- | --- |
-| Çözdüğü soru | Yönlendirme | Kesin sayım, liste, sıralama | Doğal dil cevap + doğrulama | Tematik, genel sorular |
-| Sonuç doğruluğu | Laya'ya bağlı (ölçülmedi) | Tam (graph kadar) | 2'nin doğruluğunu korur | Yaklaşık |
-| Tek başına değer | Yok | Sınırlı (API ile) | Yok | Var |
-| Tahmini kod | ~40 satır | ~60 satır × 4 backend | ~30 satır | ~200+ satır |
-| Çalışma maliyeti | 1 + 3 `Choice` | 1 DB sorgusu | 0–1 LLM + N `Noul` | Ingestion: topluluk başına LLM; sorgu: N `Score` + 1 LLM |
-| Ana risk | Yanlış yönlendirme, eski rotaları bozma | Dar kalıp seti | Dil kısıtı | Maliyet, bayatlama |
-| Veri değişikliği gerekir mi | Hayır | Tür soruları için evet (`entity_type`) | Hayır | Evet (Community düğümleri) |
+| Kriter | 1: Router | 2: DB şablonları | 3: Fact + citation | 4: Community özetleri | 5: Aday + Noul |
+| --- | --- | --- | --- | --- | --- |
+| Çözdüğü soru | Yönlendirme | Kesin sayım, liste, sıralama | Doğal dil cevap + doğrulama | Tematik, genel sorular | Anlamsal filtreli sayım |
+| Sonuç doğruluğu | Laya'ya bağlı (ölçülmedi) | Tam (graph kadar) | 2'nin doğruluğunu korur | Yaklaşık | Sınıflandırıcı kadar; aralıkla raporlanır |
+| Tek başına değer | Yok | Sınırlı (API ile) | Yok | Var | Sınırlı (2'nin aday listesiyle güçlenir) |
+| Tahmini kod | ~40 satır | ~60 satır × 4 backend | ~30 satır | ~200+ satır | ~60 satır + `list_entities()` |
+| Çalışma maliyeti | 1 + 3 `Choice` | 1 DB sorgusu | 0–1 LLM + N `Noul` | Ingestion: topluluk başına LLM; sorgu: N `Score` + 1 LLM | Aday başına 1–2 `Noul` (~33 ms) |
+| Ana risk | Yanlış yönlendirme, eski rotaları bozma | Dar kalıp seti | Dil kısıtı | Maliyet, bayatlama | Ölçek, biriken sınıflandırma hatası |
+| Veri değişikliği gerekir mi | Hayır | Tür soruları için evet (`entity_type`) | Hayır | Evet (Community düğümleri) | Hayır |
 
 ---
 
-## 7. Öneri ve doğrulama planı
+## 8. Öneri ve doğrulama planı
 
 ### Öneri
 
 1. **İlk adım: 1 + 2 + 3 tek paket olarak.** Başlangıçta sadece Kùzu backend'i ve üç kalıp: `count`, `list`, `rank`. Diğer backend'ler ölçüm olumlu çıktıktan sonra eklenir.
 2. **Yöntem 4'ü şimdilik erteleyin.** Tematik sorular gerçek bir kullanım senaryosunda ortaya çıkarsa ve daha büyük bir veri seti hazır olduğunda ele alınsın.
-3. **Varlık türü (`entity_type`)** ayrı bir iş olarak planlansın. "Kaç X var" türündeki sorular bunu bekliyor.
+3. **İkinci adım: Yöntem 5.** 1 + 2 + 3 çalıştıktan sonra, "kaç X var" türündeki sorular için eklensin. Önce tek çerçeveyle başlanır; çift çerçeve ve polarite dengesi, ölçümde etiket artefaktı görülürse eklenir.
+4. **Varlık türü (`entity_type`)**, Yöntem 5 büyük graph'ta yavaş kalırsa ya da aynı yüklemler sık tekrar ederse ingestion'a taşınsın.
 
 ### Doğrulama planı (kod yazmadan önce)
 
@@ -415,8 +547,27 @@ En belirsiz kısım Laya'nın yönlendirme ve parametre çıkarımında ne kadar
     - `direction` doğruluğu (en riskli alan)
     - Mevcut soru tiplerinden `aggregate` rotasına kaçanların oranı (hedef %0)
 3. Sonuç iyiyse 2 + 3 implement edilir. `direction` zayıf çıkarsa bunun yerine her iki yön birden sorgulanıp LLM'e verilebilir.
+4. Yöntem 5 için quickstart'taki 14 varlık 3–4 yüklemle elle etiketlenir ("is a person", "is a scientific theory", "is a place", "is a written work"). Ölçülecekler:
+    - Aday başına doğruluk ve kendinden emin yanlış oranı (P ≥ 0.70 ama yanlış)
+    - Belirsiz banda düşen aday oranı (çok yüksekse bantlar daraltılır)
+    - Tek çerçeve ile çift çerçeve arasındaki fark
 
 ### Açık sorular
 
 - Hedef backend yalnızca Kùzu mu, yoksa ilk sürümde Neo4j de gerekli mi?
 - Agregasyon cevapları LLM ile mi sentezlensin, yoksa şablon modu mu varsayılan olsun?
+- Yöntem 5'te yüklem nasıl çıkarılsın: kapalı bir tür listesi ve `Choice` ile mi, yoksa LLM ile serbest metin olarak mı?
+
+---
+
+## Ek: İncelenen dış repolar
+
+Üç repo da "aggregation" kelimesini **birden çok model kararını birleştirmek** anlamında kullanıyor, bu dokümandaki "graph üzerinde sayım" anlamında değil. Yine de ikisinden doğrudan uygulanabilir fikirler çıktı.
+
+| Repo | Ne yapıyor | Agregasyon biçimi | Bu dokümana katkısı |
+| --- | --- | --- | --- |
+| [gbesse/jev-extract](https://github.com/gbesse/jev-extract) | Dokümandan tipli kayıt çıkarımı. Adayları regex üretir, Jev sadece seçer; uzun doküman parçalara bölünür. | Parça başına kararlar kodda birleşir: `first`, `any`, `all`, `max_probability`, `majority` | **Yöntem 5'in temel ilkesi:** model saymaz, kod sayar. Ayrıca "hiç geçiyor mu?" ön sorusu (`absent`) ve sonuç önbelleği. |
+| [SammySN-car/jev-deliberation-judge](https://github.com/SammySN-car/jev-deliberation-judge) | Aynı state'i farklı ifadelerle soran bağımsız Laya "jüri üyeleri". Şu an yalnızca tasarım (`REFERENCE.md`); kod yok. | Oy (plurality), olasılık ağırlıklı oy, veto; `auto_act` / `human_review` / `escalate` durum tablosu | **Yöntem 5'e:** 0.30–0.70 belirsizlik bandı, çoklu çerçeve ve polarite dengesi, Laya'da tekrarın işe yaramadığı uyarısı. |
+| [devsoniclk/jev-polymarket-executor](https://github.com/devsoniclk/jev-polymarket-executor) | Polymarket işlem botu. Üç kaynaktan sinyal okur, Jev'e piyasa başına 4 soru sorar. | Sabit ağırlıklı ortalama (0.45 / 0.30 / 0.25) ve ağırlıklı yön oyu; güven = 2 × abs(skor − 0.5) | Yeni bir yöntem yok. Jev'den doğrudan sayı istiyor ("fair probability 0-100"), yani jev-extract'in kaçındığı kalıbı kullanıyor. Bu doküman için karşı örnek. |
+
+deliberation-judge'daki jüri deseni Yöntem 1'deki yönlendirme ve parametre çıkarımına da uygulanabilir. Aynı soru üç farklı ifadeyle yönlendirilir ve oylar birleştirilir; oylar ayrışırsa eski rotaya dönülür. Bu henüz bir öneri; ölçümde yanlış yönlendirme oranı yüksek çıkarsa değerlendirilmeli.
