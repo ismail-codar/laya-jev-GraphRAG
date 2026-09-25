@@ -118,6 +118,41 @@ Anchor varlık mevcut `SeedSelector` ile bulunur. `rank` işleminde anchor olmaz
 | En çok bağlantısı olan varlık hangisi? | rank | — | any | out |
 | Kimler bir yerde doğmuş? | list | — | BORN_IN | out |
 
+### Kapsam sınırı ve genişletme: `group` işlemi ve filtre parametreleri
+
+Bu haliyle `AggregateSpec` sadece **tek anchor × tek ilişki × yön** filtresini ve `count` / `list` / `rank` işlemlerini ifade eder. Gruplama (`GROUP BY`), sayısal metrikler (`SUM` / `AVG` / `MIN` / `MAX`, `COUNT DISTINCT`) ve property filtreleri (`communityId = 0`, `pagerank > 0.1`) spec'te yer almaz. Bu yüzden Yöntem 2'deki `group_edges` şablonuna parametre üretemez.
+
+Genişletmek için spec'e üç alan eklenir:
+
+```python
+@dataclass
+class AggregateSpec:
+    operation: str               # "count" | "list" | "rank" | "group"
+    anchor:    str | None
+    rel_type:  str | None
+    direction: str
+    keys:      list[str]    = ()   # yalnız "group": GROUP_KEYS alt kümesi
+    metrics:   list[Metric] = ()   # yalnız "group"
+    filters:   list[Filter] = ()   # tüm işlemlerde
+```
+
+Her alan farklı bir primitive ile çıkarılır:
+
+| Alan | Primitive | Neden |
+| --- | --- | --- |
+| `operation` | `Choice` (4 seçenek) | Kapalı küme |
+| `keys` | Anahtar başına 1 `Noul` ("Soru sonucu <anahtar>'a göre ayırmak istiyor mu?") | Çoklu seçim; `Choice` tek seçenek döndürür |
+| `metrics.op` | `Choice` | Kapalı küme (`METRIC_OPS`) |
+| `metrics.field` | `Choice` | Kapalı küme (`METRIC_FIELDS`) |
+| `filters.field` / `op` | `Choice` | Kapalı küme |
+| `filters.value` | **Kod** üretir, model seçer | Laya sayı üretemez (bkz. Yöntem 5, jev-extract ilkesi). Sayısal değerler sorudan regex ile çıkarılır, isim değerleri `SeedSelector` ile bulunur, model sadece adaylar arasından seçer. |
+
+Sınırlar:
+
+- **Maliyet artar.** `group` sorusu 1 router çağrısı + 1 `Choice` + |GROUP_KEYS| `Noul` + metrik ve filtre başına 2 `Choice` yapar. Yine de traversal'daki kenar başına skorlamanın altında kalır.
+- **Doğal dil karşılığı zayıf.** Çok seviyeli, çok metrikli bir sorgu kullanıcı sorusundan çok analitik bir rapordur. Bu tür sorgular için router yerine doğrudan `pipeline.query_aggregate(spec)` API'si daha güvenilir (bkz. §7).
+- **Serbest değerli filtreler.** Sorudaki değer, koddaki bir aday kümesine eşlenemiyorsa ("fizikle ilgili olanlar") bu bir yapısal filtre değil, anlamsal filtredir. Yöntem 5'e yönlendirilir.
+
 ### Riskler
 
 - **Yanlış yönlendirme.** "Newton ile Einstein nasıl bağlantılı?" sorusu `aggregate` rotasına düşerse eskiden çalışan bir soru bozulur. Laya olasılıkları kalibre değil (model kartı uyarıyor), bu yüzden bir güven eşiği gerekir: `confidence < X` ise eski rotaya dönülür.
@@ -215,6 +250,16 @@ db.top_by_degree(rel_type=None, k=3)
 
 ### Örnek: çok seviyeli, çok metrikli agregasyon
 
+> **Mevcut şablonlarla yapılamaz.** Bu sorgu elle yazılmış Cypher'dır. Yukarıdaki iki şablon (`aggregate_edges`, `top_by_degree`) bunu ifade edemez:
+>
+> - `aggregate_edges` sadece `{source, type, target}` döndürür. `pagerank` ve `communityId` gelmediği için `SUM` / `AVG` / `MIN` / `MAX` hesaplanamaz.
+> - `top_by_degree` tek anahtarla (`a.name`) gruplar ve sadece `count` yapar.
+> - Yöntem 1'in `AggregateSpec` yapısında gruplama anahtarı ve metrik alanı yoktur.
+>
+> Kısmi geçici çözüm var: `aggregate_edges(None, None)` ile tüm kenarlar çekilip Python'da `(Subject, RelationType)` bazında `EdgeCount` ve `DistinctTargets` sayılabilir. Ancak Community seviyesi ve pagerank metrikleri eksik kalır, `limit=200` de sonucu kırpar.
+>
+> Bu örnek, aşağıda önerilen `group_edges` şablonunun hedef çıktısıdır (bkz. "Önerilen genişletme").
+
 ```cypher
 MATCH (s:Entity)-[r:RELATES_TO]->(t:Entity)
 RETURN
@@ -222,12 +267,12 @@ RETURN
     s.name                   AS Subject,          // seviye 2
     r.type                   AS RelationType,     // seviye 3
 
-    SUM(t.pagerank)          AS TotalTargetRank,  // SUM(Amount)
-    COUNT(*)                 AS EdgeCount,        // COUNT(*)
-    AVG(t.pagerank)          AS AvgTargetRank,    // AVG(UnitPrice)
-    MIN(t.pagerank)          AS MinTargetRank,    // MIN(UnitPrice)
-    MAX(t.pagerank)          AS MaxTargetRank,    // MAX(UnitPrice)
-    COUNT(DISTINCT t.name)   AS DistinctTargets   // SUM(Quantity) — sonda olmalı, aşağıya bakın
+    SUM(t.pagerank)          AS TotalTargetRank,
+    COUNT(*)                 AS EdgeCount,
+    AVG(t.pagerank)          AS AvgTargetRank,
+    MIN(t.pagerank)          AS MinTargetRank,
+    MAX(t.pagerank)          AS MaxTargetRank,
+    COUNT(DISTINCT t.name)   AS DistinctTargets   // sonda olmalı, aşağıya bakın
 ORDER BY Community, Subject, RelationType;
 ```
 
@@ -262,6 +307,63 @@ Sonuçlar, quickstart'ın ürettiği `examples/.kuzu_demo` üzerinde çalıştı
 - **Daha anlamlı bir metrik hesaplanıyor ama saklanmıyor.** Laya'nın kenar doğrulama skoru (`P`, `examples/laya_kuzu_quickstart.py:90`) hesaplanıyor, fakat `upsert_edge` bu skoru kenara yazmıyor. `RELATES_TO` tablosuna bir `support DOUBLE` kolonu eklenirse `AVG(r.support)` / `MIN(r.support)` "hangi özne/ilişki grubunun kanıtı en zayıf" sorusunu cevaplayabilir.
 - **Şablona dönüştürülebilir.** Gruplama anahtarları sabit bir whitelist'ten seçilirse (`communityId`, `name`, `type`), bu sorgu `aggregate_edges` ile aynı güvenlik modeline sahip bir `group_edges(keys, metrics)` şablonu olur.
 
+### Önerilen genişletme: `group_edges` ve yapısal filtreler
+
+Mevcut iki şablon üç agregasyonu karşılıyor: `count`, `list` ve çıkış derecesine göre `rank`. Filtre olarak da yalnızca anchor, ilişki tipi ve yön destekleniyor. Aşağıdaki şablon, çok seviyeli gruplamayı, sayısal metrikleri ve property filtrelerini aynı whitelist güvenlik modeliyle ekler.
+
+```python
+# graphrag/graph/base.py
+GROUP_KEYS = {"community": "s.communityId", "subject": "s.name", "relation": "r.type",
+              "target": "t.name", "target_community": "t.communityId"}
+METRIC_FIELDS = {"target_pagerank": "t.pagerank", "source_pagerank": "s.pagerank"}  # + "support": "r.support" (kolon eklenirse)
+METRIC_OPS = {"count", "count_distinct", "sum", "avg", "min", "max"}
+FILTER_FIELDS = {"subject": "s.name", "target": "t.name", "relation": "r.type",
+                 "community": "s.communityId", "target_pagerank": "t.pagerank"}
+FILTER_OPS = {"=", "!=", "<", "<=", ">", ">=", "in"}
+
+@dataclass
+class Metric:
+    op:    str              # METRIC_OPS
+    field: str | None       # METRIC_FIELDS; count için None, count_distinct için GROUP_KEYS
+
+@dataclass
+class Filter:
+    field: str              # FILTER_FIELDS
+    op:    str              # FILTER_OPS
+    value: Any              # her zaman parametre olarak geçer, sorguya gömülmez
+
+@abstractmethod
+def group_edges(
+    self,
+    keys:    list[str],                 # GROUP_KEYS; boş liste = tek toplam satır
+    metrics: list[Metric],
+    where:   list[Filter] = (),         # agregasyondan ÖNCE (WHERE)
+    having:  list[Filter] = (),         # agregasyondan SONRA; field = metrik takma adı
+    order:   list[tuple[str, str]] = (),  # (alan, "asc" | "desc")
+    limit:   int = 200,
+) -> list[dict[str, Any]]:
+    """Group matching edges by `keys` and compute `metrics`. Every name is whitelisted."""
+```
+
+Uygulama kuralları:
+
+- **Güvenlik.** Alan, operatör ve anahtar adları yalnızca yukarıdaki sözlüklerden gelir; kullanıcı metni sorguya asla girmez. Filtre değerleri her zaman `$p0`, `$p1`, … parametresi olarak geçer.
+- **Kùzu DISTINCT sırası.** Şablon `count_distinct` metriklerini `RETURN` listesinin sonuna kendisi taşımalı (bkz. yukarıdaki Kùzu 0.11.3 hatası).
+- **`HAVING` karşılığı.** Cypher'da `HAVING` yok. `WITH <anahtarlar>, <metrikler> WHERE <having>` ile yazılır.
+- **Roll-up.** Ayrı bir özellik gerekmez; `keys` listesinden bir seviye çıkarmak yeterli.
+- **Kesilme bilgisi.** Sonuç `limit` değerine ulaşırsa bu, dönüş değerinde işaretlenmeli (`truncated=True`). Böylece Yöntem 3 "tam liste" iddiasında bulunmaz.
+
+Örnek çağrılar (quickstart):
+
+| Soru | Çağrı |
+| --- | --- |
+| Yukarıdaki çok seviyeli tablo | `group_edges(["community","subject","relation"], [sum(target_pagerank), count, avg(...), min(...), max(...), count_distinct(target)])` |
+| Hangi özne/ilişki çiftinde birden fazla hedef var? (veri sağlık kontrolü) | `group_edges(["subject","relation"], [count_distinct(target)], having=[Filter("count_distinct_target", ">", 1)])` → Newton / `BORN_IN` |
+| Pagerank'ı 0.1'den büyük hedeflere giden kenar sayısı, ilişki tipine göre | `group_edges(["relation"], [count], where=[Filter("target_pagerank", ">", 0.1)])` |
+| Topluluk 0'da en çok kenarı olan 3 özne | `group_edges(["subject"], [count], where=[Filter("community","=",0)], order=[("count","desc")], limit=3)` |
+
+Bu şablon `top_by_degree`'yi de kapsar: `group_edges(["subject"], [count], order=[("count","desc")], limit=k)`. Giriş derecesi için `keys=["target"]` kullanılır.
+
 ### Açık bir veri sorunu: varlık türü yok
 
 "Kaç fizikçi var?" ya da "kaç teori var?" sorularını hiçbir şablon cevaplayamaz, çünkü şema düğüm türü tutmuyor. Tüm düğümler `Entity` etiketli ve bir tür property'si yok. Bunu çözmenin iki yolu var:
@@ -275,7 +377,7 @@ Sonuçlar, quickstart'ın ürettiği `examples/.kuzu_demo` üzerinde çalıştı
 
 ### Riskler
 
-- **Kapsam dar.** Şablonlar sadece önceden tanımlı kalıpları cevaplar: tek varlık × tek ilişki × yön, ve derece sıralaması. "2000'den sonra kaç ödül" gibi filtreler (tarih property'si yok) desteklenmez.
+- **Kapsam dar.** İlk iki şablon sadece önceden tanımlı kalıpları cevaplar: tek varlık × tek ilişki × yön, ve derece sıralaması. `group_edges` gruplamayı, metrikleri ve property filtrelerini ekler, ama yalnızca şemada **var olan** alanlar üzerinde çalışır (`name`, `description`, `pagerank`, `communityId`, `type`). "2000'den sonra kaç ödül" gibi filtreler için önce veriye tarih property'si yazılmalı. Çok adımlı yol filtreleri de ("Einstein'ın doğduğu şehirde doğan herkes") kapsam dışındadır. İşlem bazında tam liste için bkz. §7 "İşlem bazında yapılabilirlik".
 - **Dört backend'in bakımı.** Her şablon Kùzu, Neo4j, Memgraph ve AGE için ayrı yazılıp test edilmeli.
 - **Sonuç tam ama yalnızca graph kadar tam.** Edge verification ingestion sırasında zayıf triple'ları budadıysa, sayım o budanmış graph'ın sayımıdır. Cevap metni bunu belirtmeli ("graph'ta kayıtlı 2 kişi").
 
@@ -343,6 +445,14 @@ return f"{len(rows)}: {items}"
 - Eksi: cevap doğal dil değil; soru Türkçe, veri İngilizceyse kullanıcıya İngilizce öğe listesi döner.
 
 Önerilen: iki mod bir bayrakla sunulsun. Quickstart zaten LLM'siz `ExtractiveSynthesizer` kullandığı için, orada şablon mod varsayılan olabilir.
+
+### Gruplu ve sayısal sonuçlar (`group_edges`)
+
+`_aggregate_fact` tek bir liste cümlesi üretir. Çok satırlı, çok metrikli bir `group_edges` sonucunu karşılamaz. Üç ek gerekir:
+
+- **Tablo fact'i.** Her grup satırı ayrı bir fact olarak eklenir. Böylece citation kontrolü iddia başına tek satıra bakar: `"Group (subject=Isaac Newton, relation=BORN_IN): count=2, distinct targets=2, avg target pagerank=0.0878."`
+- **Sayısal hücrelerde şablon modu zorunlu.** Laya, "0.0878" ile "0.0880" arasındaki farkı iddia doğrulamasında güvenilir biçimde ayırt edemez. Bu yüzden ondalık metrik içeren cevaplar LLM'siz şablon moduyla üretilmeli. Sadece `count` gibi tam sayılı özetlerde LLM modu kullanılabilir.
+- **Kesilme.** `truncated=True` dönen sonuçta fact metni "complete" yerine "first N of at least N" demeli. Aksi halde eksik liste yine `VERIFIED` geçer.
 
 ### Dil kısıtı
 
@@ -503,6 +613,20 @@ Sonuç fact'i Yöntem 3'teki gibi context'e girer:
 
 Cevap: "Graph'ta 2 teori var; belirsiz 1 adayla birlikte 2–3." Tek bir kesin sayı söylemek yerine belirsizliği açıkça raporlar.
 
+### Anlamsal filtre + gruplu agregasyon
+
+Yöntem 5 tek başına sadece **filtreli sayım ve liste** üretir; `SUM` / `AVG` gibi metrikleri veya gruplamayı kendisi yapmaz. Ama sonucu Yöntem 2'nin `group_edges` şablonuna yapısal bir filtre olarak verilebilir:
+
+```python
+theories = count_matching(db, "is a scientific theory", db.list_entities())
+names = [n for n, _ in theories.yes]                     # kesin küme
+db.group_edges(["subject", "relation"], [Metric("count", None)],
+               where=[Filter("subject", "in", names)])
+# belirsiz küme ile ikinci çağrı → metrikler de aralık olarak raporlanır
+```
+
+Böylece "Teorilerin ilişki tiplerine göre kenar sayıları" gibi sorular cevaplanır. Kural aynı kalır: **model sadece aday başına karar verir, gruplama ve hesap DB'de yapılır.** Belirsiz aday varsa her metrik `[yalnız evet, evet + belirsiz]` aralığı olarak verilmelidir.
+
 ### Dış repolardan alınan iki sağlamlaştırma
 
 **Çoklu çerçeve (framing) ve polarite dengesi.** Kaynak deliberation-judge. Aynı aday için yüklem iki farklı ifadeyle sorulur:
@@ -571,6 +695,51 @@ flowchart LR
 | Ana risk | Yanlış yönlendirme, eski rotaları bozma | Dar kalıp seti | Dil kısıtı | Maliyet, bayatlama | Ölçek, biriken sınıflandırma hatası |
 | Veri değişikliği gerekir mi | Hayır | Tür soruları için evet (`entity_type`) | Hayır | Evet (Community düğümleri) | Hayır |
 
+### İşlem bazında yapılabilirlik
+
+Kısaltmalar: **✓** mevcut tasarımla yapılabilir · **G** yapılabilir, ama önerilen genişletme gerekir (`group_edges`, `AggregateSpec.keys/metrics/filters`) · **~** yaklaşık · **✗** yapılamaz.
+
+Mevcut şema: `Entity(name, description, pagerank, communityId)`, `RELATES_TO(type)` (`kuzu_client.py:45`).
+
+#### Agregasyon işlemleri
+
+| İşlem | Örnek soru | 1 | 2 | 3 | 4 | 5 | Yapılması için gereken |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `COUNT` (tek anchor × ilişki) | Calculus'u kaç kişi geliştirdi? | ✓ | ✓ | ✓ | ~ | — | Mevcut tasarım yeterli |
+| Tam liste | Newton hangi eserleri yazdı? | ✓ | ✓ | ✓ | ✗ | — | `limit` aşılırsa `truncated` bilgisi |
+| Çıkış derecesine göre top-k | En çok bağlantısı olan varlık? | ✓ | ✓ | ✓ | ✗ | — | Mevcut `top_by_degree` |
+| Giriş derecesine göre top-k | En çok atıf alan varlık? | G | G | ✓ | ✗ | — | `group_edges(["target"], [count])` |
+| `COUNT DISTINCT` | Newton kaç farklı yere bağlı? | G | G | ✓ | ✗ | — | `count_distinct` metriği; Kùzu'da sona alınmalı |
+| `SUM` / `AVG` / `MIN` / `MAX` | İlişki tipine göre ortalama hedef pagerank? | G | G | G | ✗ | — | `group_edges` metrikleri; Yöntem 3'te tablo fact + şablon modu |
+| Tek seviyeli `GROUP BY` | İlişki tipine göre kenar sayısı? | G | G | G | ✗ | — | `group_edges(["relation"], ...)` |
+| Çok seviyeli `GROUP BY` | Community × Subject × Relation tablosu | G | G | G | ✗ | — | `group_edges` + Yöntem 3'te satır başına fact. Router yerine `query_aggregate` API'si önerilir |
+| Roll-up | Aynı tablo, özne seviyesinde | G | G | G | ✗ | — | `keys` listesinden bir seviye çıkarmak |
+| `HAVING` (grup sonrası filtre) | Birden fazla doğum yeri olan kişi? | G | G | G | ✗ | — | `group_edges(having=...)`, Cypher'da `WITH ... WHERE` |
+| Kenar destek skoru metrikleri | Kanıtı en zayıf ilişki grubu? | ✗ | ✗ | ✗ | ✗ | ✗ | **Veri:** `RELATES_TO.support DOUBLE` kolonu ve `upsert_edge`'in Laya skorunu yazması |
+| Tematik özet | Kütleçekimiyle ilgili ana fikirler? | ✓ | ✗ | ✗ | ✓ | ✗ | Yöntem 4 (community özetleri) |
+
+#### Filtre işlemleri
+
+| Filtre türü | Örnek | 1 | 2 | 3 | 4 | 5 | Yapılması için gereken |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Yapısal: anchor + ilişki + yön | Calculus'u geliştirenler | ✓ | ✓ | ✓ | ✗ | — | Mevcut tasarım yeterli |
+| Property eşitliği | Topluluk 0'daki özneler | G | G | ✓ | ✗ | — | `Filter("community", "=", 0)`; değer koddan gelir |
+| Sayısal aralık | Pagerank'ı 0.1'den büyük hedefler | G | G | ✓ | ✗ | — | `Filter("target_pagerank", ">", 0.1)`; sayı sorudan regex ile çıkarılır, Laya'ya ürettirilmez |
+| Çoklu değer (`IN`) | Newton veya Leibniz'in ilişkileri | G | G | ✓ | ✗ | — | `Filter("subject", "in", [...])`; isimler `SeedSelector` ile |
+| Varlık türü | Kaç fizikçi var? | ✓ | ✗ | ✓ | ✗ | ✓ | Sorgu anında Yöntem 5, **veya** ingestion'da `entity_type` + `Filter("type", "=", ...)` |
+| Anlamsal yüklem | Fizikle ilgili varlıklar | ✓ | ✗ | ✓ | ~ | ✓ | Yöntem 5; sonuç aralık olarak raporlanır |
+| Anlamsal filtre + metrik | Teorilerin ilişki tipine göre sayısı | G | G | G | ✗ | ✓ | Yöntem 5 → `Filter("subject", "in", yes)` → `group_edges` |
+| Tarih / zaman | 1900'den sonra yapılan keşifler | ✗ | ✗ | ✗ | ✗ | ~ | **Veri:** kenar veya düğümde tarih property'si. Yöntem 5 açıklamadan tahmin edebilir, ama sonuç güvenilmez |
+| Çok adımlı yol filtresi | Einstein'ın doğduğu şehirde doğan herkes | ✗ | ✗ | ✗ | ✗ | ✗ | Kapsam dışı. Ya 2 ardışık `aggregate_edges` çağrısını bağlayan bir plan adımı, ya da `path_edges` şablonu gerekir |
+| Negatif filtre | Hiçbir şey yazmamış kişiler | ✗ | ✗ | ✗ | ✗ | ~ | `NOT EXISTS` desenli yeni bir şablon; tür bilgisi olmadan "kişi" kümesi Yöntem 5'e bağlı |
+
+Özet:
+
+- **Mevcut tasarım** (1 + 2 + 3): yalnızca tek anchor × ilişki × yön filtresiyle `count`, `list` ve çıkış derecesine göre `rank`.
+- **`group_edges` genişletmesiyle** (Yöntem 1, 2, 3'te "G" sütunları): tüm SQL tarzı agregasyonlar ve şemada var olan alanlar üzerindeki yapısal filtreler. Toplam iş, Yöntem 2'nin tahminine ek olarak backend başına ~80 satır ve Yöntem 1'e ~40 satır.
+- **Yöntem 5 ile:** şemada karşılığı olmayan anlamsal ve tür filtreleri. Bu filtreler `group_edges`'e `IN` filtresi olarak bağlanır.
+- **Veri değişikliği olmadan hiçbir yöntemle olmayanlar:** destek skoru metrikleri, tarih filtreleri, çok adımlı yol filtreleri.
+
 ---
 
 ## 8. Öneri ve doğrulama planı
@@ -581,6 +750,8 @@ flowchart LR
 2. **Yöntem 4'ü şimdilik erteleyin.** Tematik sorular gerçek bir kullanım senaryosunda ortaya çıkarsa ve daha büyük bir veri seti hazır olduğunda ele alınsın.
 3. **İkinci adım: Yöntem 5.** 1 + 2 + 3 çalıştıktan sonra, "kaç X var" türündeki sorular için eklensin. Önce tek çerçeveyle başlanır; çift çerçeve ve polarite dengesi, ölçümde etiket artefaktı görülürse eklenir.
 4. **Varlık türü (`entity_type`)**, Yöntem 5 büyük graph'ta yavaş kalırsa ya da aynı yüklemler sık tekrar ederse ingestion'a taşınsın.
+5. **Üçüncü adım: `group_edges` ve yapısal filtreler.** Önce yalnızca API üzerinden (`pipeline.query_aggregate(spec)`), şablon modunda ve Kùzu'da sunulsun. Router'daki `group` işlemi ve filtre çıkarımı, parametre ölçümü olumlu çıkarsa eklensin.
+6. **`RELATES_TO.support` kolonu** düşük maliyetli bir veri değişikliği. Kanıt gücüne göre metrik ve filtre açtığı için `group_edges` ile birlikte yapılabilir.
 
 ### Doğrulama planı (kod yazmadan önce)
 
@@ -596,7 +767,8 @@ En belirsiz kısım Laya'nın yönlendirme ve parametre çıkarımında ne kadar
     - `direction` doğruluğu (en riskli alan)
     - Mevcut soru tiplerinden `aggregate` rotasına kaçanların oranı (hedef %0)
 3. Sonuç iyiyse 2 + 3 implement edilir. `direction` zayıf çıkarsa bunun yerine her iki yön birden sorgulanıp LLM'e verilebilir.
-4. Yöntem 5 için quickstart'taki 14 varlık 3–4 yüklemle elle etiketlenir ("is a person", "is a scientific theory", "is a place", "is a written work"). Ölçülecekler:
+4. `group` genişletmesi için aynı sete 5 gruplu / filtreli soru eklenir. Ölçülecekler: `keys` seçiminin tam eşleşme oranı, `metrics.op` / `metrics.field` doğruluğu, sayısal filtre değerinin regex adaylarından doğru seçilme oranı.
+5. Yöntem 5 için quickstart'taki 14 varlık 3–4 yüklemle elle etiketlenir ("is a person", "is a scientific theory", "is a place", "is a written work"). Ölçülecekler:
     - Aday başına doğruluk ve kendinden emin yanlış oranı (P ≥ 0.70 ama yanlış)
     - Belirsiz banda düşen aday oranı (çok yüksekse bantlar daraltılır)
     - Tek çerçeve ile çift çerçeve arasındaki fark
@@ -606,6 +778,8 @@ En belirsiz kısım Laya'nın yönlendirme ve parametre çıkarımında ne kadar
 - Hedef backend yalnızca Kùzu mu, yoksa ilk sürümde Neo4j de gerekli mi?
 - Agregasyon cevapları LLM ile mi sentezlensin, yoksa şablon modu mu varsayılan olsun?
 - Yöntem 5'te yüklem nasıl çıkarılsın: kapalı bir tür listesi ve `Choice` ile mi, yoksa LLM ile serbest metin olarak mı?
+- Çok seviyeli / çok metrikli agregasyon kullanıcı sorusu olarak mı gelecek, yoksa yalnızca analitik rapor olarak mı (API)? Cevap, `group` işleminin router'a eklenip eklenmeyeceğini belirler.
+- Tarih filtresi gerçek bir ihtiyaç mı? Öyleyse ingestion'da hangi kenar tiplerine tarih yazılacağı belirlenmeli.
 
 ---
 
