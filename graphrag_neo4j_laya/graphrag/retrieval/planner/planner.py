@@ -23,7 +23,9 @@ from graphrag.models.decision_factory import get_decision_model
 
 from . import candidates, semantic_filter
 from .describe import describe_plan
-from .plan import FieldRef, Filter, Having, Hop, Metric, Order, QueryPlan, validate_plan
+from .plan import (
+    LIST_METRIC_OPS, FieldRef, Filter, Having, Hop, Metric, Order, QueryPlan, validate_plan,
+)
 from .render_kuzu import fetch
 
 logger = logging.getLogger(__name__)
@@ -197,6 +199,8 @@ class _Planning:
         if self.plan.operation == "rank":
             self.plan.order = [Order(metric, descending=True)]
             self.plan.limit = candidates.small_limit(numbers)
+        elif metric.op in LIST_METRIC_OPS:
+            pass  # a list of values cannot be compared with a number
         elif numbers and self.yes("having", _HAVING_INSTRUCTION):
             op = self.choose("having_op", "How is the group value compared with the number?", _COMPARISON_OPTIONS)
             self.plan.having.append(Having(metric, op, self._number("having_value", numbers)))
@@ -232,6 +236,13 @@ def _metric_options(plan: QueryPlan) -> dict[str, str]:
         who = "start entity" if v == "v0" else f"step-{v[1:]} entity"
         for op, word in words.items():
             options[f"{op}:{v}.pagerank"] = f"the {word} PageRank (importance) of the {who}"
+    # A list cannot be ordered, so `collect` is offered to group plans only.
+    if plan.operation != "rank":
+        for e in candidates.edge_vars(plan):
+            step = int(e[1:]) + 1
+            options[f"collect:{e}.type"] = (
+                f"the names of the relation types used in step {step}, listed per group"
+            )
     return options
 
 

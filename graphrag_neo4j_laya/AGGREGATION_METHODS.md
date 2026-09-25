@@ -728,7 +728,7 @@ Yöntem 1–3'teki sabit şablonlar yerine sorguyu **adım adım** kurar. Her ad
 2. Başlangıç (`Choice`): seed varlık mı, bütün graph mı. Seed yoksa "bütün graph" zorunludur.
 3. Hop döngüsü (`Choice`, en fazla `aggregate_max_hops=3`): seçenekler o anki sınırdan (frontier) **gerçekten çıkan** ilişki tipi × yön çiftleri, bir yönde birden fazla tip varsa `any:<yön>`, ve `stop`. Graph'ta olmayan bir ilişki ya da yön seçilemez.
 4. Filtreler: iki ve daha fazla hop'ta başlangıç varlığını hariç tutma (`Noul`); soruda sayı varsa sayısal filtre (alan, operatör ve değer; değer sorudan regex ile çıkar).
-5. Şekil (`group` / `rank`): gruplama anahtarları tek `ask_batch` çağrısıyla, metrik `Choice` ile; `rank` için `limit` sorudaki sayıdan; soruda sayı varsa `HAVING`.
+5. Şekil (`group` / `rank`): gruplama anahtarları tek `ask_batch` çağrısıyla, metrik `Choice` ile (`count`, `count_distinct`, düğüm `pagerank`'i üzerinde `sum`/`avg`/`min`/`max`, ve yalnız `group` planlarında adım başına `collect:e<i>.type`; liste sıralanamadığı için `rank`'e sunulmaz); `rank` için `limit` sorudaki sayıdan; soruda sayı varsa `HAVING`.
 6. Anlamsal filtre (`Choice`, kapalı liste): `none`, `person`, `theory`, `place`, `work`, `organisation`, `phenomenon`. Seçilirse Yöntem 5 çalışır: adaylar DB'den gelir, her biri `Noul` ile bantlanır (≥ 0,70 kesin, ≤ 0,30 hayır) ve kesin küme `IN` filtresi olarak plana eklenir. Sonuç `[kesin, kesin + belirsiz]` aralığıdır.
 
 Sonra plan (tipli bir AST, `plan.py`) parametreli Kùzu Cypher'a çevrilir. Tanımlayıcılar beyaz listeden gelir, bütün değerler parametredir. Planın İngilizce açıklaması soruya karşı bir kez `Noul` ile kontrol edilir ("Bu sorgu soruyu cevaplıyor mu?"). Kontrol geçmezse en küçük marjlı adım ikinci seçenekle değiştirilip plan bir kez daha kurulur. Plan güveni en zayıf adımın olasılığıdır. Güven düşükse ya da kontrol geçmezse `None` döner ve pipeline eski rotalara düşer.
@@ -751,6 +751,10 @@ Yöntem 1–5'in yapamadığı çok adımlı yol filtreleri de bu yolla ifade ed
 ### Ölçüm (gerçek Laya)
 
 Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `examples/data/aggregate_eval.json`, 33 soru: 10 basit, 6 gruplu / filtreli, 4 iki hop'lu, 3 anlamsal filtreli agregasyon, ve 10 agregasyon olmayan soru; 13'ü Türkçe. Seed'ler setten gelir, yani seed seçim hataları sayılara karışmaz. Laya `multilingual` checkpoint, CPU, 2026-09-25.
+
+> Ölçümden sonra `collect` metriği plan diline ve metrik `Choice` listesine eklendi, sete de bunu
+> ölçen bir soru girdi (`g07`, gruplu `collect`); set artık 34 soru. Aşağıdaki metrik doğruluğu bu
+> seçeneği içermiyor, yeniden ölçülmedi.
 
 | Ölçüm | Sonuç | Bayrak hedefi |
 | --- | --- | --- |
@@ -777,7 +781,7 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 - **Hop seçimi yazı-tura düzeyinde.** Örnek: `BORN_IN:out` 0,36, `BORN_IN:in` 0,34. `stop` genellikle erken değil geç seçiliyor; bir soruda 3 hop'luk anlamsız bir yol kuruldu.
 - **Geri çeviri kontrolü zayıf bir ayırıcı.** Doğru planların yarısını reddediyor, yanlışların üçte birini geçiriyor. Onarım adımı bu yüzden az işe yarıyor.
 - **İşlem, filtre ve `HAVING` adımları görece iyi**, ama bu adımların çoğu soruda "yok" cevabı bekleniyor; yüksek oran kısmen bundan geliyor.
-- **Mimari beklendiği gibi çalışıyor:** bütün geçersiz hamleler yapısal olarak engelleniyor, üretilen her plan geçerli Cypher'a dönüşüyor, boş ve kesilmiş sonuçlar doğru raporlanıyor (229 birim testi).
+- **Mimari beklendiği gibi çalışıyor:** bütün geçersiz hamleler yapısal olarak engelleniyor, üretilen her plan geçerli Cypher'a dönüşüyor, boş ve kesilmiş sonuçlar doğru raporlanıyor (235 birim testi).
 
 ### Sonraki denemeler (ölçülmedi)
 
@@ -850,7 +854,7 @@ Mevcut şema: `Entity(name, description, pagerank, communityId)`, `RELATES_TO(ty
 | Çok seviyeli `GROUP BY` | Community × Subject × Relation tablosu | G | G | G | ✗ | — | ✓ | `group_edges` + Yöntem 3'te satır başına fact. Router yerine `query_aggregate` API'si önerilir |
 | Roll-up | Aynı tablo, özne seviyesinde | G | G | G | ✗ | — | ✓ | `keys` listesinden bir seviye çıkarmak |
 | `HAVING` (grup sonrası filtre) | Birden fazla doğum yeri olan kişi? | G | G | G | ✗ | — | ✓ | `group_edges(having=...)`, Cypher'da `WITH ... WHERE` |
-| İlişki tiplerini listeleme (`collect`) | Kim hangi tür katkılar yapmış? | ✗ | G | G | ✗ | — | ✓ | `collect` metriği plan dilinde var; planlayıcının metrik `Choice` listesinde yok, yani şimdilik yalnız `query_aggregate` ile |
+| İlişki tiplerini listeleme (`collect`) | Kim hangi tür katkılar yapmış? | ✗ | G | G | ✗ | — | ✓ | `collect` metriği plan dilinde ve planlayıcının metrik `Choice` listesinde var; `rank` planlarına sunulmaz |
 | İkinci ilişki tipi üzerinden isteğe bağlı sayım | Doğum yerine göre yazılan eser sayısı | ✗ | ✗ | ✗ | ✗ | — | ✗ | Plan dilinde ikinci bir dal ve `OPTIONAL MATCH` (soru 2 ve 3'ün eser sayıları) |
 | Kenar destek skoru metrikleri | Kanıtı en zayıf ilişki grubu? | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | **Veri:** `RELATES_TO.support DOUBLE` kolonu ve `upsert_edge`'in Laya skorunu yazması |
 | Tematik özet | Kütleçekimiyle ilgili ana fikirler? | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | Yöntem 4 (community özetleri) |

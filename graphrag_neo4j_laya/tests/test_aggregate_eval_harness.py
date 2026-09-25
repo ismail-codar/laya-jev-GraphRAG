@@ -67,7 +67,7 @@ class TestQuestionSet:
     def test_composition(self):
         categories = ("simple", "grouped", "two_hop", "semantic", "non_aggregate")
         counts = {c: sum(i["category"] == c for i in ITEMS) for c in categories}
-        assert counts == {"simple": 10, "grouped": 6, "two_hop": 4, "semantic": 3, "non_aggregate": 10}
+        assert counts == {"simple": 10, "grouped": 7, "two_hop": 4, "semantic": 3, "non_aggregate": 10}
         assert sum(i["lang"] == "tr" for i in ITEMS) >= len(ITEMS) / 3
         assert len({i["id"] for i in ITEMS}) == len(ITEMS)
 

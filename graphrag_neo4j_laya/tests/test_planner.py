@@ -99,6 +99,43 @@ class TestFiltersAndShape:
         assert result.plan.keys == [FieldRef("e0", "type")]
 
 
+class TestCollectMetric:
+    """`collect` gathers the relation types of a step; group plans only."""
+
+    @staticmethod
+    def _metric_options(model) -> dict[str, str]:
+        return next(o for o in model.choice_calls if "count" in o and any(k.startswith("count_distinct") for k in o))
+
+    def test_group_can_collect_the_relation_types(self, science_graph):
+        model = ScriptedModel(choices=["group", "any:out", "stop", "collect:e0.type"],
+                              batch={"key:v0.name": 0.9})
+        result = _plan(science_graph, model, "Kim hangi tür katkılar yapmış?", [])
+        assert result.plan.metrics == [Metric("collect", FieldRef("e0", "type"))]
+        assert "list of every relation type" in result.description
+
+    def test_every_step_can_be_collected(self, science_graph):
+        model = ScriptedModel(choices=["group", "any:out", "any:out", "collect:e1.type"],
+                              batch={"key:v0.name": 0.9})
+        result = _plan(science_graph, model, "q", [], max_hops=2)
+        assert result.plan.metrics == [Metric("collect", FieldRef("e1", "type"))]
+        assert {"collect:e0.type", "collect:e1.type"} <= set(self._metric_options(model))
+
+    def test_rank_is_never_offered_collect(self, science_graph):
+        # A list cannot be ordered, so ranking by it would make the plan invalid.
+        model = ScriptedModel(choices=["rank", "any:out", "stop", "count"],
+                              nouls=[0.1], batch={"key:v0.name": 0.9})
+        _plan(science_graph, model, "En çok bağlantısı olan 3 varlık hangisi?", [])
+        assert not any(k.startswith("collect:") for k in self._metric_options(model))
+
+    def test_a_collected_list_is_never_compared_with_a_number(self, science_graph):
+        # The question holds a number, so `having` would normally be asked.
+        model = ScriptedModel(choices=["group", "any:out", "stop", "collect:e0.type"],
+                              nouls=[0.1], batch={"key:v0.name": 0.9})
+        result = _plan(science_graph, model, "2 ve üzeri tür katkı yapanlar hangi türlerde?", [])
+        assert result.plan.having == []
+        assert not any(t.step.startswith("having") for t in result.trace)
+
+
 class TestTraceAndFailures:
     def test_trace_and_confidence(self, science_graph):
         model = ScriptedModel(choices=["count", "anchor", "DEVELOPED:in", "stop"], prob=0.8)

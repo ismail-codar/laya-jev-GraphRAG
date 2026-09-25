@@ -1,5 +1,5 @@
 {
-  "description": "Labelled questions for the guided query planner on the science_history graph. `edges` are the verified edges of the quickstart graph (including the aligner's misalignments). Aggregate items carry the expected plan, the expected result rows on that graph and a known-wrong plan variant for the back-translation check. Plan specs: hops are 'TYPE:dir' or 'any:dir'; filters and having are [field-or-metric, op, value]; metrics use the planner's keys ('count', 'count_distinct:v1.name', 'sum:v0.pagerank').",
+  "description": "Labelled questions for the guided query planner on the science_history graph. `edges` are the verified edges of the quickstart graph (including the aligner's misalignments). Aggregate items carry the expected plan, the expected result rows on that graph and a known-wrong plan variant for the back-translation check. Plan specs: hops are 'TYPE:dir' or 'any:dir'; filters and having are [field-or-metric, op, value]; metrics use the planner's keys ('count', 'count_distinct:v1.name', 'sum:v0.pagerank', 'collect:e0.type').",
   "entities_from": "science_history.json",
   "edges": [
     ["Albert Einstein", "BORN_IN", "Ulm"],
@@ -151,6 +151,21 @@
                "having": [["count", ">", 1]]},
       "wrong_plan": {"operation": "group", "hops": ["any:out"], "keys": ["e0.type"], "metrics": ["count"],
                      "having": [["count", "=", 1]]}
+    },
+    {
+      "id": "g07", "lang": "tr", "category": "grouped", "intent": "aggregate",
+      "question": "Her varlık hangi ilişki tiplerini kullanıyor?",
+      "seeds": [],
+      "expected": [["Albert Einstein", ["BORN_IN", "DISCOVERED"]],
+                   ["General Relativity", ["EXTENDS", "EXPLAINS", "PREDICTED"]],
+                   ["Gottfried Leibniz", ["DEVELOPED"]],
+                   ["Isaac Newton", ["AUTHORED", "BORN_IN", "LEADS", "BORN_IN"]],
+                   ["LIGO", ["DISCOVERED"]],
+                   ["Principia Mathematica", ["RELATED_TO"]]],
+      "plan": {"operation": "group", "hops": ["any:out"], "keys": ["v0.name"],
+               "metrics": ["collect:e0.type"]},
+      "wrong_plan": {"operation": "group", "hops": ["any:out"], "keys": ["v0.name"],
+                     "metrics": ["count"]}
     },
     {
       "id": "t01", "lang": "en", "category": "two_hop", "intent": "aggregate",
