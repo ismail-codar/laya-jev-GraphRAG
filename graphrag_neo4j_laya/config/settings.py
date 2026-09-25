@@ -135,6 +135,24 @@ class Settings(BaseSettings):
     )
 
     # ── Guided query planner (aggregate route) ───────────────────────────────
+    aggregate_route_enabled: bool = Field(
+        False,
+        description="Offer the 'aggregate' intent to the router and run the guided planner",
+    )
+    aggregate_route_min_confidence: float = Field(
+        0.5, ge=0.0, le=1.0,
+        description="Router confidence required before an 'aggregate' route is taken",
+    )
+    aggregate_min_confidence: float = Field(
+        0.3, ge=0.0, le=1.0,
+        description="Plan confidence (weakest step probability) required to execute a plan",
+    )
+    aggregate_max_hops: int = Field(3, ge=0, le=5, description="Maximum hops the planner may add")
+    aggregate_row_limit: int = Field(200, gt=0, description="Row limit for list/group results")
+    aggregate_answer_mode: str = Field(
+        "template",
+        description="Answer mode for aggregate results: 'template' (no LLM) or 'llm'",
+    )
     relation_schema_path: str | None = Field(
         None,
         description="JSON file with relation type descriptions (a dataset file with a 'schema' key, or a plain mapping)",
