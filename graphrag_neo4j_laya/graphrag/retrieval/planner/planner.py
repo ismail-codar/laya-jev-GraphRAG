@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from config.settings import settings
 from graphrag.models.decision_factory import get_decision_model
 
-from . import candidates
+from . import candidates, semantic_filter
 from .describe import describe_plan
 from .plan import FieldRef, Filter, Having, Hop, Metric, Order, QueryPlan, validate_plan
 from .render_kuzu import fetch
@@ -68,6 +68,8 @@ class PlannerResult:
     trace: list[StepTrace] = field(default_factory=list)
     confidence: float = 1.0
     description: str = ""
+    # Entity kind the target must have (semantic_filter.PREDICATE_KINDS), or None.
+    semantic: str | None = None
 
 
 class _Planning:
@@ -80,6 +82,7 @@ class _Planning:
         self.model = get_decision_model()
         self.trace: list[StepTrace] = []
         self.plan = QueryPlan(operation="list", limit=planner.row_limit)
+        self.semantic: str | None = None
 
     def context(self) -> str:
         so_far = describe_plan(self.plan, self.p.relation_schema) if self.trace else "(empty)"
@@ -198,6 +201,11 @@ class _Planning:
             op = self.choose("having_op", "How is the group value compared with the number?", _COMPARISON_OPTIONS)
             self.plan.having.append(Having(metric, op, self._number("having_value", numbers)))
 
+    def semantic_step(self) -> None:
+        kind = self.choose("semantic", semantic_filter.PREDICATE_INSTRUCTION, semantic_filter.PREDICATE_KINDS)
+        if kind != semantic_filter.NO_PREDICATE:
+            self.semantic = kind
+
     def _number(self, step: str, numbers: list[int | float]) -> int | float:
         if len(numbers) == 1:
             self.forced(step, str(numbers[0]))
@@ -264,15 +272,20 @@ class GuidedQueryPlanner:
             state.hops()
             state.filters(numbers)
             state.shape(numbers)
+            state.semantic_step()
             validate_plan(state.plan)
         except Exception as exc:  # noqa: BLE001 — planner must never break the pipeline
             logger.warning("Guided planner failed for %r: %s", question, exc)
             return None
         # Overridden steps are a deliberate repair; the plan check vouches for them.
+        description = describe_plan(state.plan, self.relation_schema)
+        if state.semantic:
+            description += f" ({semantic_filter.describe_predicate(state.semantic)})"
         asked = [t.probability for t in state.trace if not t.forced and not t.overridden]
         return PlannerResult(
             plan=state.plan,
             trace=state.trace,
             confidence=min(asked) if asked else 1.0,
-            description=describe_plan(state.plan, self.relation_schema),
+            description=description,
+            semantic=state.semantic,
         )

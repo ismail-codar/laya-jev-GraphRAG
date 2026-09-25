@@ -13,7 +13,9 @@ known-wrong variant, and the min- and product-based plan confidences are
 compared on how well they separate correct plans from wrong ones.
 
 Seeds come from the question set, so seed selection errors do not leak into
-the planner numbers.
+the planner numbers. For semantic-filter questions the labelled `members`
+stand in for the per-candidate Noul answers, so the result match measures
+the plan, not the candidate scoring.
 
 Usage (run from graphrag_neo4j_laya/)
 -----
@@ -43,6 +45,7 @@ from graphrag.retrieval.planner.describe import describe_plan
 from graphrag.retrieval.planner.plan import FieldRef, Filter, Having, Hop, Order, QueryPlan, validate_plan
 from graphrag.retrieval.planner.planner import _parse_metric
 from graphrag.retrieval.planner.render_kuzu import fetch
+from graphrag.retrieval.planner.semantic_filter import PREDICATE_KINDS, describe_predicate, with_members
 from graphrag.retrieval.router import QueryIntent
 
 logger = logging.getLogger(__name__)
@@ -51,9 +54,10 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA = ROOT / "examples" / "data" / "aggregate_eval.json"
 DEFAULT_OUT = Path("benchmarks/results/aggregate_planner_eval.json")
 
-STEPS = ("operation", "start", "hop_types", "hop_directions", "stop", "filters", "keys", "metrics", "having")
+STEPS = ("operation", "start", "hop_types", "hop_directions", "stop", "filters", "keys", "metrics", "having",
+         "semantic")
 INTENTS = ("aggregate", "local", "multi_hop", "global")
-CATEGORIES = ("simple", "grouped", "two_hop", "non_aggregate")
+CATEGORIES = ("simple", "grouped", "two_hop", "semantic", "non_aggregate")
 DEFAULT_RANK_LIMIT = 5
 
 # Flag decision inputs from the plan (U6), not a definition of done.
@@ -94,6 +98,12 @@ def parse_plan(spec: dict[str, Any], row_limit: int = 200) -> QueryPlan:
     return plan
 
 
+def describe_spec(spec: dict[str, Any], relation_schema: dict[str, str] | None = None) -> str:
+    """The description the planner would give this spec, predicate included."""
+    text = describe_plan(parse_plan(spec), relation_schema or {})
+    return f"{text} ({describe_predicate(spec['semantic'])})" if spec.get("semantic") else text
+
+
 def validate_item(item: dict[str, Any]) -> None:
     """Raise ValueError when a question-set record is malformed."""
     for key in ("id", "lang", "category", "intent", "question", "seeds"):
@@ -108,11 +118,15 @@ def validate_item(item: dict[str, Any]) -> None:
     for key in ("plan", "wrong_plan", "expected"):
         if key not in item:
             raise ValueError(f"{item['id']}: aggregate item needs {key!r}")
-    gold, wrong = parse_plan(item["plan"]), parse_plan(item["wrong_plan"])
+    gold = parse_plan(item["plan"])
+    parse_plan(item["wrong_plan"])
     if gold.start and gold.start not in item["seeds"]:
         raise ValueError(f"{item['id']}: plan start {gold.start!r} is not a seed")
-    if gold == wrong:
+    if item["plan"] == item["wrong_plan"]:
         raise ValueError(f"{item['id']}: wrong_plan equals plan")
+    semantic = item["plan"].get("semantic")
+    if semantic is not None and (semantic not in PREDICATE_KINDS or "members" not in item):
+        raise ValueError(f"{item['id']}: a semantic plan needs a known kind and 'members'")
 
 
 def build_graph(db, data: dict[str, Any], data_path: Path = DEFAULT_DATA) -> dict[str, str]:
@@ -134,7 +148,12 @@ def _filter_set(filters: list[Filter]) -> set:
     return {(f.ref, f.op, tuple(f.value) if isinstance(f.value, list) else f.value) for f in filters}
 
 
-def compare_steps(expected: QueryPlan, actual: QueryPlan | None) -> dict[str, bool]:
+def compare_steps(
+    expected: QueryPlan,
+    actual: QueryPlan | None,
+    expected_semantic: str | None = None,
+    actual_semantic: str | None = None,
+) -> dict[str, bool]:
     if actual is None:
         return dict.fromkeys(STEPS, False)
     return {
@@ -147,6 +166,7 @@ def compare_steps(expected: QueryPlan, actual: QueryPlan | None) -> dict[str, bo
         "keys":           set(actual.keys) == set(expected.keys),
         "metrics":        actual.metrics == expected.metrics,
         "having":         set(actual.having) == set(expected.having),
+        "semantic":       actual_semantic == expected_semantic,
     }
 
 
@@ -247,12 +267,17 @@ def evaluate(
 
 def _evaluate_plan(db, item, planner, check, schema) -> dict[str, Any]:
     question = item["question"]
-    gold, wrong = parse_plan(item["plan"]), parse_plan(item["wrong_plan"])
+    gold = parse_plan(item["plan"])
+    gold_semantic = item["plan"].get("semantic")
     t0 = time.perf_counter()
     result = planner.plan(question, item["seeds"])
     plan_ms = (time.perf_counter() - t0) * 1000
     actual = result.plan if result else None
-    steps = compare_steps(gold, actual)
+    actual_semantic = result.semantic if result else None
+    steps = compare_steps(gold, actual, gold_semantic, actual_semantic)
+    if actual is not None and actual_semantic is not None:
+        # Labelled members stand in for the per-candidate Noul answers.
+        actual = with_members(actual, item["members"] if actual_semantic == gold_semantic else [])
     asked = [t.probability for t in (result.trace if result else []) if not t.forced and not t.overridden]
     return {
         "plan_ms": plan_ms,
@@ -262,8 +287,8 @@ def _evaluate_plan(db, item, planner, check, schema) -> dict[str, Any]:
         "result_match": actual is not None and result_rows(db, actual) == expected_rows(item),
         "confidence_min": result.confidence if result else None,
         "confidence_product": math.prod(asked) if result else None,
-        "check_gold": check(question, describe_plan(gold, schema)),
-        "check_wrong": check(question, describe_plan(wrong, schema)),
+        "check_gold": check(question, describe_spec(item["plan"], schema)),
+        "check_wrong": check(question, describe_spec(item["wrong_plan"], schema)),
     }
 
 

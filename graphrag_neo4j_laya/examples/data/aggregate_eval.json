@@ -189,6 +189,33 @@
       "wrong_plan": {"operation": "count", "start": "Isaac Newton", "hops": ["any:out", "DEVELOPED:out"],
                      "filters": [["v2.name", "!=", "Isaac Newton"]]}
     },
+    {
+      "id": "m01", "lang": "en", "category": "semantic", "intent": "aggregate",
+      "question": "How many theories are there in the graph?",
+      "seeds": [],
+      "members": ["General Relativity", "Universal Gravitation"],
+      "expected": [[2]],
+      "plan": {"operation": "count", "semantic": "theory"},
+      "wrong_plan": {"operation": "count"}
+    },
+    {
+      "id": "m02", "lang": "tr", "category": "semantic", "intent": "aggregate",
+      "question": "Graph'ta kaç kişi var?",
+      "seeds": [],
+      "members": ["Albert Einstein", "Gottfried Leibniz", "Isaac Newton"],
+      "expected": [[3]],
+      "plan": {"operation": "count", "semantic": "person"},
+      "wrong_plan": {"operation": "count", "semantic": "place"}
+    },
+    {
+      "id": "m03", "lang": "en", "category": "semantic", "intent": "aggregate",
+      "question": "List every place in the graph.",
+      "seeds": [],
+      "members": ["Ulm", "Woolsthorpe"],
+      "expected": [["Ulm"], ["Woolsthorpe"]],
+      "plan": {"operation": "list", "semantic": "place"},
+      "wrong_plan": {"operation": "list", "semantic": "organisation"}
+    },
     {"id": "n01", "lang": "en", "category": "non_aggregate", "intent": "local",
      "question": "Where was Albert Einstein born?", "seeds": ["Albert Einstein"]},
     {"id": "n02", "lang": "en", "category": "non_aggregate", "intent": "local",

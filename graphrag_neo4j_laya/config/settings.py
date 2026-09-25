@@ -153,6 +153,10 @@ class Settings(BaseSettings):
     )
     aggregate_max_hops: int = Field(3, ge=0, le=5, description="Maximum hops the planner may add")
     aggregate_row_limit: int = Field(200, gt=0, description="Row limit for list/group results")
+    aggregate_semantic_max_candidates: int = Field(
+        200, gt=0,
+        description="Most candidates a semantic filter scores one by one; above it the plan is declined",
+    )
     aggregate_answer_mode: str = Field(
         "template",
         description="Answer mode for aggregate results: 'template' (no LLM) or 'llm'",

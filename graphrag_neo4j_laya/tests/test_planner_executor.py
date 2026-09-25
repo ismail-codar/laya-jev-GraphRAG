@@ -42,8 +42,8 @@ class TestCheckAndRepair:
     def test_failed_check_repairs_weakest_step(self, science_graph):
         # hop0 is the least certain step (0.5); its runner-up DEVELOPED:in is tried.
         model = ScriptedModel(
-            choices=["count", "anchor", "BORN_IN:in", "stop"] * 2,
-            probs=[0.9, 0.9, 0.5, 0.9] * 2,
+            choices=["count", "anchor", "BORN_IN:in", "stop", "none"] * 2,
+            probs=[0.9, 0.9, 0.5, 0.9, 0.9] * 2,
             nouls=[0.2, 0.9],
         )
         result = _run(science_graph, model, AE1, ["Calculus"])

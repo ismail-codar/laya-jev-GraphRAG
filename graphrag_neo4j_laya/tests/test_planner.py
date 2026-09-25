@@ -56,7 +56,7 @@ class TestHopLoop:
         model = ScriptedModel(choices=["list", "anchor"])
         result = _plan(science_graph, model, "Banana Bread neyle ilişkili?", ["Banana Bread"])
         assert result.plan.hops == []
-        assert len(model.choice_calls) == 2
+        assert not any("stop" in options for options in model.choice_calls)
         assert any(t.step == "hop0" and t.forced for t in result.trace)
 
     def test_max_hops_is_respected(self, science_graph):
@@ -69,7 +69,7 @@ class TestHopLoop:
         model = ScriptedModel(choices=["count", "stop"])
         result = _plan(science_graph, model, "Graph'ta kaç varlık var?", [])
         assert result.plan.start is None and result.plan.hops == []
-        assert len(model.choice_calls) == 2
+        assert not any("anchor" in options for options in model.choice_calls)
 
 
 class TestFiltersAndShape:

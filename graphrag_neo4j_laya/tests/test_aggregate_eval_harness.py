@@ -12,11 +12,12 @@ from dataclasses import replace
 import pytest
 
 from graphrag.benchmarks.aggregate_planner_eval import (
-    STEPS, CountingModel, evaluate, expected_rows, format_report, load_eval_set, parse_plan,
+    STEPS, CountingModel, describe_spec, evaluate, expected_rows, format_report, load_eval_set, parse_plan,
     result_rows, separation, summarise, validate_item,
 )
 from graphrag.retrieval.planner.plan import Hop
 from graphrag.retrieval.planner.planner import PlannerResult, StepTrace
+from graphrag.retrieval.planner.semantic_filter import with_members
 from graphrag.retrieval.router import QueryIntent, RouteDecision
 from tests.conftest import SCIENCE_EDGES
 from tests.scripted_model import ScriptedModel
@@ -39,16 +40,17 @@ class OraclePlanner:
     def __init__(self, plans: dict[str, object] | None = None) -> None:
         self.plans = {i["question"]: parse_plan(i["plan"]) for i in AGGREGATE}
         self.plans.update(plans or {})
+        self.semantic = {i["question"]: i["plan"].get("semantic") for i in AGGREGATE}
 
     def plan(self, question, seeds):
-        return PlannerResult(self.plans[question], [StepTrace("operation", ["count"], "count", 0.9)], 0.9)
+        return PlannerResult(self.plans[question], [StepTrace("operation", ["count"], "count", 0.9)], 0.9,
+                             semantic=self.semantic[question])
 
 
 def _gold_check(question, description):
     """High for the labelled plan's description, low for anything else."""
     gold = {i["question"]: i for i in AGGREGATE}[question]
-    from graphrag.retrieval.planner.describe import describe_plan
-    return 0.9 if description == describe_plan(parse_plan(gold["plan"]), {}) else 0.1
+    return 0.9 if description == describe_spec(gold["plan"]) else 0.1
 
 
 def _run(db, router=None, planner=None):
@@ -63,8 +65,9 @@ class TestQuestionSet:
         validate_item(item)
 
     def test_composition(self):
-        counts = {c: sum(i["category"] == c for i in ITEMS) for c in ("simple", "grouped", "two_hop", "non_aggregate")}
-        assert counts == {"simple": 10, "grouped": 6, "two_hop": 4, "non_aggregate": 10}
+        categories = ("simple", "grouped", "two_hop", "semantic", "non_aggregate")
+        counts = {c: sum(i["category"] == c for i in ITEMS) for c in categories}
+        assert counts == {"simple": 10, "grouped": 6, "two_hop": 4, "semantic": 3, "non_aggregate": 10}
         assert sum(i["lang"] == "tr" for i in ITEMS) >= len(ITEMS) / 3
         assert len({i["id"] for i in ITEMS}) == len(ITEMS)
 
@@ -73,7 +76,10 @@ class TestQuestionSet:
 
     @pytest.mark.parametrize("item", AGGREGATE, ids=[i["id"] for i in AGGREGATE])
     def test_labelled_plan_reproduces_expected_rows(self, science_graph, item):
-        assert result_rows(science_graph, parse_plan(item["plan"])) == expected_rows(item)
+        plan = parse_plan(item["plan"])
+        if item["plan"].get("semantic"):
+            plan = with_members(plan, item["members"])
+        assert result_rows(science_graph, plan) == expected_rows(item)
 
     def test_malformed_record_is_rejected(self):
         bad = dict(AGGREGATE[0], plan={"operation": "count", "hops": ["any:sideways"]})
@@ -138,3 +144,17 @@ def test_separation():
     assert separation([0.9, 0.8, 0.2], [True, True, False]) == 1.0
     assert separation([0.5, 0.5], [True, False]) == 0.5
     assert separation([0.9], [True]) is None
+
+
+def test_wrong_semantic_kind_fails_semantic_step_and_result(science_graph):
+    class WrongKind(OraclePlanner):
+        def plan(self, question, seeds):
+            result = super().plan(question, seeds)
+            if result.semantic == "theory":
+                result.semantic = "place"
+            return result
+
+    records, summary = _run(science_graph, planner=WrongKind())
+    rec = next(r for r in records if r["id"] == "m01")
+    assert rec["steps"]["semantic"] is False and rec["result_match"] is False
+    assert summary["steps"]["semantic"] == pytest.approx((len(AGGREGATE) - 1) / len(AGGREGATE))
