@@ -8,6 +8,7 @@ Runs entirely locally in the Python process (no Docker required).
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 import numpy as np
 import networkx as nx
@@ -21,6 +22,22 @@ except ImportError:
     kuzu = None
 
 logger = logging.getLogger(__name__)
+
+# Second line of defence for run_read_query: the renderer only emits MATCH /
+# WITH / RETURN queries, so any of these keywords means the text did not come
+# from it.
+_NON_READ_KEYWORDS = re.compile(
+    r"\b(CREATE|SET|DELETE|DETACH|MERGE|REMOVE|DROP|ALTER|COPY|ATTACH|USE|"
+    r"INSTALL|LOAD|EXPORT|IMPORT|CALL|CHECKPOINT|BEGIN|COMMIT|ROLLBACK)\b",
+    re.IGNORECASE,
+)
+
+# field -> (MATCH pattern, expression) for distinct_values
+_DISTINCT_FIELDS = {
+    "name":        ("(n:Entity)", "n.name"),
+    "communityId": ("(n:Entity)", "n.communityId"),
+    "type":        ("(:Entity)-[n:RELATES_TO]->(:Entity)", "n.type"),
+}
 
 
 class KuzuClient(BaseGraphClient):
@@ -116,6 +133,56 @@ class KuzuClient(BaseGraphClient):
         sims = (matrix @ q_vec) / (np.linalg.norm(matrix, axis=1) * np.linalg.norm(q_vec) + 1e-9)
         top_indices = np.argsort(sims)[::-1][:top_k]
         return [{"name": names[i], "score": float(sims[i])} for i in top_indices]
+
+    # ── Introspection (guided query planner) ─────────────────────────────────
+
+    def frontier_moves(self, frontier: list[str] | None) -> list[dict[str, Any]]:
+        if frontier is not None and not frontier:
+            return []
+        moves = []
+        for direction, pattern in (("out", "(a:Entity)-[r:RELATES_TO]->(b:Entity)"),
+                                   ("in",  "(a:Entity)<-[r:RELATES_TO]-(b:Entity)")):
+            where = "WHERE a.name IN $names " if frontier is not None else ""
+            # count(DISTINCT) last: Kùzu 0.11.3 zeroes aggregates listed after it.
+            query = (
+                f"MATCH {pattern} {where}"
+                "RETURN r.type, count(*), count(DISTINCT b.name) ORDER BY r.type"
+            )
+            params = {"names": list(frontier)} if frontier is not None else {}
+            results = self.conn.execute(query, parameters=params)
+            while results.has_next():
+                rel_type, edge_count, neighbor_count = results.get_next()
+                moves.append({
+                    "type":           rel_type,
+                    "direction":      direction,
+                    "edge_count":     edge_count,
+                    "neighbor_count": neighbor_count,
+                })
+        return moves
+
+    def distinct_values(self, field: str, limit: int = 50) -> list[Any]:
+        if field not in _DISTINCT_FIELDS:
+            raise ValueError(f"distinct_values: unsupported field {field!r}")
+        pattern, expr = _DISTINCT_FIELDS[field]
+        query = (
+            f"MATCH {pattern} WHERE {expr} IS NOT NULL "
+            f"RETURN DISTINCT {expr} ORDER BY {expr} LIMIT $limit"
+        )
+        results = self.conn.execute(query, parameters={"limit": limit})
+        values = []
+        while results.has_next():
+            values.append(results.get_next()[0])
+        return values
+
+    def run_read_query(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        if _NON_READ_KEYWORDS.search(query):
+            raise ValueError("run_read_query: only read-only MATCH queries are allowed")
+        results = self.conn.execute(query, parameters=params)
+        columns = results.get_column_names()
+        rows = []
+        while results.has_next():
+            rows.append(dict(zip(columns, results.get_next())))
+        return rows
 
     def _get_networkx_graph(self) -> nx.DiGraph:
         query = "MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity) RETURN a.name, b.name"

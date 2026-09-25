@@ -99,6 +99,32 @@ class BaseGraphClient(ABC):
         """
         pass
 
+    # ── Introspection (guided query planner) ─────────────────────────────────
+    # Non-abstract so backends without planner support keep working; the
+    # planner treats NotImplementedError as "route unavailable".
+
+    def frontier_moves(self, frontier: list[str] | None) -> list[dict[str, Any]]:
+        """
+        Return the (relation type, direction) moves that actually exist on the
+        frontier. `frontier=None` means every Entity node.
+
+        Returns:
+            list of dicts with keys: type (str), direction ("out" | "in"),
+            edge_count (int), neighbor_count (int, distinct neighbours)
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support frontier_moves")
+
+    def distinct_values(self, field: str, limit: int = 50) -> list[Any]:
+        """Return up to *limit* distinct non-null values of a whitelisted field."""
+        raise NotImplementedError(f"{type(self).__name__} does not support distinct_values")
+
+    def run_read_query(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """
+        Execute a parameterised read-only query produced by the plan renderer.
+        Rows are returned as dicts keyed by column name.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support run_read_query")
+
     # ── Global Algorithms ─────────────────────────────────────────────────────
 
     @abstractmethod

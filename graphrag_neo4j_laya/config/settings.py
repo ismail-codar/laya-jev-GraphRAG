@@ -134,6 +134,12 @@ class Settings(BaseSettings):
         description="Final number of seed nodes passed to traversal",
     )
 
+    # ── Guided query planner (aggregate route) ───────────────────────────────
+    relation_schema_path: str | None = Field(
+        None,
+        description="JSON file with relation type descriptions (a dataset file with a 'schema' key, or a plain mapping)",
+    )
+
     # ── VRAM budget (informational) ───────────────────────────────────────────
     vram_budget_gb: float = Field(8.0, description="Total VRAM on RTX 5060")
     vram_ceiling_gb: float = Field(7.5, description="Safety ceiling for combined peak usage")
