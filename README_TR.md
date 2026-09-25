@@ -237,14 +237,14 @@ Q: How is Newton's work connected to Einstein's theory of gravity?
 I don't have enough verified information in my knowledge graph to confidently answer this question. ...
 
 Q: Yerçekimi dalgalarını ilk kim tespit etti?
-[⚠️ UNVERIFIED] - Gravitational Waves: LIGO DISCOVERED Gravitational Waves. Ripples in spacetime predicted by general relativity.
+- Gravitational Waves: LIGO DISCOVERED Gravitational Waves. Ripples in spacetime predicted by general relativity.
 ...
 ```
 
 Bu çalışmadaki her sonuç, pipeline'daki bir güvenlik kontrolünün işini yapmasından gelir:
 - **S1 ("Newton nerede doğdu?"):** `local` olarak yönlendirildi, doğrulanmış `BORN_IN` kenarından cevaplandı ve kaynak kontrolünü geçti.
 - **S2 (Newton–Einstein bağlantısı):** `multi_hop` olarak, yani çok adımlı aramaya doğru şekilde yönlendirildi. Halüsinasyon kapısı getirilen bağlamı yetersiz buldu ve pipeline tahmin yürütmek yerine cevap vermedi.
-- **S3** (Türkçe soru, İngilizce veri üzerinde): arama `LIGO DISCOVERED Gravitational Waves` olgusunu buldu. Kaynak kontrolü 0,87 ile 0,90 eşiğinin hemen altında kaldığı için cevap `[⚠️ UNVERIFIED]` olarak işaretlendi.
+- **S3** (Türkçe soru, İngilizce veri üzerinde): arama `LIGO DISCOVERED Gravitational Waves` olgusunu buldu ve cevaptaki her iddia kaynak kontrolünü geçti (en zayıf iddia 0,92).
 
 #### Hızlı başlangıç seçenekleri
 
@@ -426,7 +426,7 @@ Aynı hızlı başlangıç, CPU, iki checkpoint:
 
 | Checkpoint | Budanan halüsinasyon kenarları | Cevaplanan sorular (doğrulanmış / işaretli / çekimser) | Ingestion |
 |------------|--------------------------------|--------------------------------------------------------|-----------|
-| `multilingual` (varsayılan) | 2 / 2 | 1 / 1 / 1 | ~25 sn |
+| `multilingual` (varsayılan) | 2 / 2 | 2 / 0 / 1 | ~25 sn |
 | İngilizce (kök) | 2 / 2 | 1 / 0 / 2 | ~50 sn |
 
 Multilingual checkpoint bu örnekte hem daha iyi sonuç verdi hem de iki kat daha hızlıydı; varsayılan olmasının nedeni bu.
@@ -457,7 +457,7 @@ Laya bir System One karar modelidir. **Ona verdiğiniz durumu** yargılar; kendi
 
 - **Ontoloji hizalaması hatasız değil:** Örnekte 12 ilişkiden 3'ü yanlış tipe gidiyor (ör. `"came up with"` → `BORN_IN`, `"formulated"` → `DISCOVERED`, `"introduced the law of"` → `RELATED_TO`). Alanınıza göre yazılmış küçük ve açıklayıcı bir şema bu oranı düşürür.
 - **Çok adımlı sorular kapıda takılabilir:** Newton–Einstein sorusu doğru stratejiye yönlendiriliyor, ama halüsinasyon kapısı bağlamı yetersiz bulup cevap vermiyor. Bu, tahmin yürütmek yerine çekimser kalan tasarımın bilinçli bir sonucudur.
-- **Kaynak kontrolü eşiği sıkı:** 0,90 eşiği, Türkçe soruda doğru bulunan olguyu 0,87 ile `[⚠️ UNVERIFIED]` olarak işaretletti. Kendi verinizle ayarlayın.
+- **Kaynak kontrolü iddia bazlıdır ve yalnızca aynı dilde çalışır:** `verify_citations` cevabı cümlelere böler, her birini bağlama karşı ayrı kontrol eder ve en düşük skoru alır. Böylece tek bir uydurma cümle bütün cevabı düşürür (desteklenen cümleler 0,99, uydurma 0,00). Önceki sürüm cevabı tek parça değerlendiriyordu ve doğru cevaba 0,87 verirken uydurma iddia eklenmiş cevaba 0,94 veriyordu. Ancak Laya diller arası eşleştirme yapamıyor: İngilizce bağlama karşı doğru bir Türkçe iddia ~0,01 alıyor. Bu yüzden graftan farklı dilde yazılmış bir LLM cevabı her zaman `[⚠️ UNVERIFIED]` olarak işaretlenir. Bu hata güvenli yöndedir: yanlış bir iddia asla onaylanmaz. Doğrulanmış cevap istiyorsanız cevabı grafın dilinde ürettirin.
 - **Kùzu embedding'leri bellekte:** Grafı kuran ve sorgulayan kod aynı süreçte olmalıdır (bkz. Kùzu notu).
 - **`--llm llama` yolu GPU gerektirir:** Llama-3.1-8B NF4 için CUDA ve bitsandbytes gerekir. Yukarıdaki sonuçlar GPU'suz bir makinede, extractive sentezleyiciyle alınmıştır; Llama yolu orada test edilmemiştir.
 

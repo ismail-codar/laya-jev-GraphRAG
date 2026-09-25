@@ -237,14 +237,14 @@ Q: How is Newton's work connected to Einstein's theory of gravity?
 I don't have enough verified information in my knowledge graph to confidently answer this question. ...
 
 Q: Yerçekimi dalgalarını ilk kim tespit etti?
-[⚠️ UNVERIFIED] - Gravitational Waves: LIGO DISCOVERED Gravitational Waves. Ripples in spacetime predicted by general relativity.
+- Gravitational Waves: LIGO DISCOVERED Gravitational Waves. Ripples in spacetime predicted by general relativity.
 ...
 ```
 
 Every outcome in that run comes from a pipeline safety check doing its job:
 - **Q1:** routed `local`, answered from the verified `BORN_IN` edge, citation check passed.
 - **Q2:** routed `multi_hop`. The hallucination gate judged the retrieved context too weak and the pipeline abstained rather than guess.
-- **Q3** (Turkish, against English data): retrieval found the `LIGO DISCOVERED Gravitational Waves` fact. The citation check scored just under its 0.90 bar, so the answer is flagged `[⚠️ UNVERIFIED]`.
+- **Q3** (Turkish, against English data): retrieval found the `LIGO DISCOVERED Gravitational Waves` fact, and every claim in the answer passed the citation check (weakest claim 0.92).
 
 #### Quickstart options
 
@@ -424,7 +424,7 @@ Same quickstart, CPU, both checkpoints:
 
 | Checkpoint | Hallucinated edges pruned | Queries answered (verified / flagged / abstained) | Ingestion |
 |------------|---------------------------|---------------------------------------------------|-----------|
-| `multilingual` (default) | 2 / 2 | 1 / 1 / 1 | ~25 s |
+| `multilingual` (default) | 2 / 2 | 2 / 0 / 1 | ~25 s |
 | English root | 2 / 2 | 1 / 0 / 2 | ~50 s |
 
 #### 5. Run the ablation harness
@@ -447,6 +447,7 @@ print(f"Δ:    {result['delta']:.4f}")
 Laya is a System One decision model. It judges the **state you give it**, and it has no world knowledge of its own. In practice that means:
 - **Verify edges against their source text** (`EdgeVerifier.verify_against_source`), not in isolation. Asked "is *Newton → born in → Woolsthorpe* valid?" without evidence, Laya scores it about the same as *Newton → baked → Banana Bread*. Given the source chunk, it separates them cleanly (0.996 vs 0.000).
 - **Evidence checks catch unsupported entities, not every wrong relation.** A triple whose target never appears in the source (`born in Paris`, P≈0.01) is rejected. A wrong relation between two entities that are both in the source (`Marie Curie invented Warsaw`, P≈0.98) can slip through.
+- **The citation check is per claim, and same-language only.** `verify_citations` splits the answer into sentences, checks each against the context and keeps the weakest score, so one invented sentence fails the whole answer (0.00 vs 0.99 for the supported ones). Laya can't match a claim across languages, though: a correct Turkish claim against English context scores ~0.01, so an LLM answer written in another language than the graph is always flagged `[⚠️ UNVERIFIED]`. It errs safe, and never passes a wrong claim. Keep answers in the language of the graph if you need them verified.
 - **Treat thresholds as tunable.** The model card flags the probabilities as over-confident and not yet calibrated. Adjust `BFS_PRUNE_THRESHOLD`, `SEED_FINAL_TOP_K` and the gate/citation thresholds in `graphrag/retrieval/post_traversal.py` against your own data.
 
 ---

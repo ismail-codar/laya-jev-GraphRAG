@@ -75,6 +75,45 @@ class TestLayaModelNoulChoice:
         assert result.backend == "laya"
 
 
+class TestCitationVerification:
+    """verify_citations checks each claim separately; the weakest one decides."""
+
+    _NODES = [{"name": "LIGO", "text": "LIGO DISCOVERED Gravitational Waves."}]
+
+    def _verify(self, answer: str, scores: dict[str, float]):
+        from graphrag.retrieval.post_traversal import verify_citations
+
+        def _noul(context: str, _instruction: str) -> float:
+            claim = context.rsplit("Claim: ", 1)[1]
+            return scores[claim]
+
+        with patch("graphrag.retrieval.post_traversal.get_decision_model") as mock_get_model:
+            mock_get_model.return_value.noul.side_effect = _noul
+            return verify_citations(answer, self._NODES)
+
+    def test_split_claims_by_line_and_sentence(self):
+        from graphrag.retrieval.post_traversal import _split_claims
+
+        answer = "- LIGO: Detected waves. Built in 1990s.\n\n* Second line!"
+        assert _split_claims(answer) == ["LIGO: Detected waves.", "Built in 1990s.", "Second line!"]
+
+    def test_all_claims_supported_is_faithful(self):
+        result = self._verify("A is true. B is true.", {"A is true.": 0.97, "B is true.": 0.95})
+        assert result.is_faithful
+        assert result.noul_score == pytest.approx(0.95)
+
+    def test_one_fabricated_claim_fails_whole_answer(self):
+        result = self._verify("A is true. B is made up.", {"A is true.": 0.99, "B is made up.": 0.01})
+        assert not result.is_faithful
+        assert result.noul_score == pytest.approx(0.01)
+        assert ("B is made up.", 0.01) in result.claim_scores
+
+    def test_empty_answer_is_not_faithful(self):
+        from graphrag.retrieval.post_traversal import verify_citations
+
+        assert not verify_citations("   ", self._NODES).is_faithful
+
+
 class TestLayaChunker:
     """Test NoulBoundaryChunker with a mocked decision model."""
 

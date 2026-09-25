@@ -17,7 +17,8 @@ All functions use get_decision_model() and work with ANY backend (Laya/Jev/Ablat
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from graphrag.models.decision_factory import get_decision_model
@@ -29,6 +30,9 @@ logger = logging.getLogger(__name__)
 _HALLUCINATION_GATE_THRESHOLD = 0.50   # P(sufficient) < 0.5 → abstain
 _CITATION_VERIFY_THRESHOLD    = 0.90   # P(faithful)   > 0.9 → safe to return
 _RERANK_BOTTOM_PERCENTILE     = 0.20   # Drop lowest 20% of context nodes
+_MAX_CITATION_CLAIMS          = 20     # Upper bound on per-claim Noul calls
+
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
 
 # ── Data Structures ────────────────────────────────────────────────────────────
@@ -47,8 +51,18 @@ class PostTraversalResult:
 class CitationResult:
     """Result of citation verification after LLM synthesis."""
     is_faithful:  bool
-    noul_score:   float
+    noul_score:   float                  # min P(supported) over all claims
     answer:       str
+    claim_scores: list[tuple[str, float]] = field(default_factory=list)
+
+
+def _split_claims(answer: str) -> list[str]:
+    """Split an answer into claims: one per line, then one per sentence."""
+    claims: list[str] = []
+    for line in answer.splitlines():
+        line = line.strip().lstrip("-*•").strip()
+        claims.extend(c.strip() for c in _SENTENCE_RE.split(line) if c.strip())
+    return claims
 
 
 # ── 1. Context Reranking (Score primitive) ─────────────────────────────────────
@@ -255,30 +269,44 @@ def verify_citations(
     if not llm_answer.strip():
         return CitationResult(is_faithful=False, noul_score=0.0, answer=llm_answer)
 
+    # Each claim is checked on its own and the weakest one decides. Judging the
+    # whole answer at once lets supported lines mask a fabricated one: measured
+    # on the quickstart, a faithful answer scored 0.87 while the same answer
+    # plus an invented claim scored 0.94. Per claim: 0.97 vs 0.00.
+    claims = _split_claims(llm_answer)
+    if len(claims) > _MAX_CITATION_CLAIMS:
+        logger.warning(
+            "Citation verification: %d claims, checking the first %d",
+            len(claims), _MAX_CITATION_CLAIMS,
+        )
+        claims = claims[:_MAX_CITATION_CLAIMS]
+    if not claims:
+        return CitationResult(is_faithful=False, noul_score=0.0, answer=llm_answer)
+
     model = get_decision_model()
 
-    context_text = " | ".join(
-        f"{n.get('name', '?')}: {n.get('text', '')[:200]}"
-        for n in context_nodes[:10]
+    context_text = "\n".join(
+        f"- {n.get('name', '?')}: {n.get('text', '')}" for n in context_nodes[:10]
     )
-    context = (
-        f"Context knowledge:\n{context_text}\n\n"
-        f"Generated answer:\n{llm_answer}"
-    )
-    instruction = (
-        "Is every factual claim in the generated answer strictly supported by "
-        "the context knowledge? There should be no hallucinated facts."
-    )
+    instruction = "Is this claim supported by the context knowledge?"
+    claim_scores = [
+        (claim, model.noul(f"Context knowledge:\n{context_text}\n\nClaim: {claim}", instruction))
+        for claim in claims
+    ]
 
-    noul_score = model.noul(context, instruction)
+    noul_score = min(score for _, score in claim_scores)
     is_faithful = noul_score >= threshold
 
     logger.info(
-        "Citation verification: noul=%.3f, threshold=%.2f → %s",
-        noul_score, threshold, "VERIFIED" if is_faithful else "FLAGGED",
+        "Citation verification: min noul=%.3f over %d claims, threshold=%.2f → %s",
+        noul_score, len(claim_scores), threshold, "VERIFIED" if is_faithful else "FLAGGED",
     )
+    for claim, score in claim_scores:
+        if score < threshold:
+            logger.info("  unsupported claim (P=%.3f): %s", score, claim)
     return CitationResult(
         is_faithful=is_faithful,
         noul_score=noul_score,
         answer=llm_answer,
+        claim_scores=claim_scores,
     )
