@@ -36,7 +36,6 @@ _OPERATION_OPTIONS = {
     "rank":  "The question asks which entity has the most or the least of something.",
     "group": "The question asks for a breakdown: a number per type, per entity or per group.",
 }
-_START_INSTRUCTION = "Does the question ask about this one specific entity, or about the whole graph?"
 _HOP_INSTRUCTION = "Which next step brings this graph query closer to answering the question?"
 _EXCLUDE_INSTRUCTION = "Does the question ask for entities other than the start entity itself?"
 _NUMERIC_FILTER_INSTRUCTION = "Does the question keep only entities whose numeric value is above or below a number?"
@@ -129,16 +128,17 @@ class _Planning:
                                           _OPERATION_OPTIONS)
 
     def start(self, seeds: list[str]) -> None:
-        if not seeds:
-            self.forced("start", "all")
-            return
-        anchor = seeds[0]
-        options = {
-            "anchor": f"The question is about the specific entity '{anchor}'.",
-            "all":    "The question is about all entities in the graph, not one specific entity.",
-        }
-        if self.choose("start", _START_INSTRUCTION, options) == "anchor":
+        # Measured as the weakest step of the planner: asked as a Choice, the
+        # model picked "the whole graph" for all 14 questions that named their
+        # seed (P(all) = 0.995 for "How many places was Isaac Newton born in?").
+        # Whether a question names an entity is a question about the text, not
+        # a judgement, so code answers it.
+        anchor = seeds[0] if seeds else None
+        if anchor and candidates.mentions_entity(self.question, anchor):
             self.plan.start = anchor
+            self.forced("start", "anchor")
+        else:
+            self.forced("start", "all")
 
     def frontier(self) -> list[str] | None:
         if not self.plan.hops:

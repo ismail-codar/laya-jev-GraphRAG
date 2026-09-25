@@ -26,16 +26,16 @@ def _plan(db, model, question, seeds, overrides=None, **kw):
 
 class TestAcceptancePlans:
     def test_ae1_count_incoming_developed(self, science_graph):
-        model = ScriptedModel(choices=["count", "anchor", "DEVELOPED:in", "stop"])
+        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"])
         result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus", "Isaac Newton"])
         assert result.plan.operation == "count"
         assert result.plan.start == "Calculus"
         assert result.plan.hops == [Hop("DEVELOPED", "in")]
         # Only moves that exist on Calculus are offered.
-        assert set(model.choice_calls[2]) == {"DEVELOPED:in", "BORN_IN:in", "any:in", "stop"}
+        assert set(model.choice_calls[1]) == {"DEVELOPED:in", "BORN_IN:in", "any:in", "stop"}
 
     def test_ae2_group_by_relation_type(self, science_graph):
-        model = ScriptedModel(choices=["group", "all", "any:out", "stop", "count"],
+        model = ScriptedModel(choices=["group", "any:out", "stop", "count"],
                               batch={"key:e0.type": 0.9})
         result = _plan(science_graph, model, "Her ilişki tipinde kaç kenar var?", ["Calculus"])
         assert result.plan.start is None
@@ -45,22 +45,66 @@ class TestAcceptancePlans:
         assert model.batch_calls == 1
 
     def test_ae3_two_hops_excluding_start(self, science_graph):
-        model = ScriptedModel(choices=["list", "anchor", "BORN_IN:out", "BORN_IN:in", "stop"], nouls=[0.9])
+        model = ScriptedModel(choices=["list", "BORN_IN:out", "BORN_IN:in", "stop"], nouls=[0.9])
         result = _plan(science_graph, model, "Einstein'ın doğduğu yerde doğan başka kim var?", ["Albert Einstein"])
         assert result.plan.hops == [Hop("BORN_IN", "out"), Hop("BORN_IN", "in")]
         assert result.plan.filters == [Filter(FieldRef("v2", "name"), "!=", "Albert Einstein")]
 
 
+class TestStartStep:
+    """
+    The start step is decided by code, not by the model: the seed is the
+    anchor when the question names it. Measured reason — asked as a Choice,
+    the model chose "the whole graph" for all 14 seeded questions of the
+    labelled set.
+    """
+
+    def test_a_named_seed_becomes_the_anchor(self, science_graph):
+        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"])
+        result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus"])
+        assert result.plan.start == "Calculus"
+        assert not any("anchor" in options for options in model.choice_calls)
+
+    def test_a_seed_the_question_never_names_is_ignored(self, science_graph):
+        # SeedSelector returns a best vector match even when the question
+        # names nothing; that is not a reason to anchor on it.
+        model = ScriptedModel(choices=["count", "stop"])
+        result = _plan(science_graph, model, "Graph'ta kaç varlık var?", ["Isaac Newton"])
+        assert result.plan.start is None
+
+    @pytest.mark.parametrize("question, seed", [
+        ("Calculus'a kaç varlık bağlı?", "Calculus"),                    # Turkish suffix
+        ("Einstein'ın doğduğu yer neresi?", "Albert Einstein"),          # surname alone
+        ("How many places was Isaac Newton born in?", "Isaac Newton"),   # full name
+        ("isaac newton kaç eser yazdı?", "Isaac Newton"),                # case
+    ])
+    def test_forms_that_count_as_naming_the_seed(self, science_graph, question, seed):
+        result = _plan(science_graph, ScriptedModel(choices=["count", "stop"]), question, [seed])
+        assert result.plan.start == seed
+
+    def test_a_longer_word_does_not_match_a_short_name(self, science_graph):
+        result = _plan(science_graph, ScriptedModel(choices=["count", "stop"]),
+                       "ulmus ağacı graph'ta var mı?", ["Ulm"])
+        assert result.plan.start is None
+
+    def test_the_step_is_forced_so_it_cannot_lower_confidence(self, science_graph):
+        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"], prob=0.8)
+        result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus"])
+        start = next(t for t in result.trace if t.step == "start")
+        assert start.forced and start.selected == "anchor"
+        assert result.confidence == pytest.approx(0.8)
+
+
 class TestHopLoop:
     def test_empty_frontier_forces_stop_without_asking(self, science_graph):
-        model = ScriptedModel(choices=["list", "anchor"])
+        model = ScriptedModel(choices=["list"])
         result = _plan(science_graph, model, "Banana Bread neyle ilişkili?", ["Banana Bread"])
         assert result.plan.hops == []
         assert not any("stop" in options for options in model.choice_calls)
         assert any(t.step == "hop0" and t.forced for t in result.trace)
 
     def test_max_hops_is_respected(self, science_graph):
-        model = ScriptedModel(choices=["list", "anchor"])  # then always the first non-stop move
+        model = ScriptedModel(choices=["list"])  # then always the first non-stop move
         result = _plan(science_graph, model, "q", ["Isaac Newton"], max_hops=2)
         assert len(result.plan.hops) <= 2
         assert sum(1 for opts in model.choice_calls if "stop" in opts) <= 2
@@ -80,7 +124,7 @@ class TestFiltersAndShape:
         assert result.plan.filters == [Filter(FieldRef("v1", "pagerank"), ">", 0.1)]
 
     def test_no_numbers_skips_numeric_filter(self, science_graph):
-        model = ScriptedModel(choices=["count", "anchor", "DEVELOPED:in", "stop"])
+        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"])
         result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus"])
         assert result.plan.filters == []
         assert not any(t.step.startswith("filter") for t in result.trace)
@@ -138,7 +182,7 @@ class TestCollectMetric:
 
 class TestTraceAndFailures:
     def test_trace_and_confidence(self, science_graph):
-        model = ScriptedModel(choices=["count", "anchor", "DEVELOPED:in", "stop"], prob=0.8)
+        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"], prob=0.8)
         result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus"])
         steps = [t.step for t in result.trace]
         assert steps[:3] == ["operation", "start", "hop0"]
@@ -148,8 +192,9 @@ class TestTraceAndFailures:
         assert result.confidence == pytest.approx(min(t.probability for t in result.trace if not t.forced))
 
     def test_override_replaces_a_step(self, science_graph):
-        model = ScriptedModel(choices=["count", "anchor", "DEVELOPED:in", "stop"], prob=0.8)
-        result = _plan(science_graph, model, "q", ["Calculus"], overrides={"hop0": "BORN_IN:in"})
+        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"], prob=0.8)
+        result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus"],
+                       overrides={"hop0": "BORN_IN:in"})
         assert result.plan.hops == [Hop("BORN_IN", "in")]
         hop0 = next(t for t in result.trace if t.step == "hop0")
         # The overridden option keeps the probability the model gave it.
@@ -166,7 +211,7 @@ class TestTraceAndFailures:
         from unittest.mock import MagicMock
         db = MagicMock()
         db.frontier_moves.side_effect = NotImplementedError
-        assert _plan(db, ScriptedModel(choices=["count", "anchor"]), "q", ["x"]) is None
+        assert _plan(db, ScriptedModel(choices=["count"]), "q", ["x"]) is None
 
 
 class TestExtractNumbers:

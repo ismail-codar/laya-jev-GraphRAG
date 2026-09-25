@@ -33,7 +33,7 @@ def _run(db, model, question, seeds, **kw):
 
 class TestCheckAndRepair:
     def test_passing_check_executes_once(self, science_graph):
-        model = ScriptedModel(choices=["count", "anchor", "DEVELOPED:in", "stop"], nouls=[0.9])
+        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"], nouls=[0.9])
         result = _run(science_graph, model, AE1, ["Calculus"])
         assert result.rows == [{"count_distinct_v1_name": 1}]
         assert result.repaired is False
@@ -42,8 +42,8 @@ class TestCheckAndRepair:
     def test_failed_check_repairs_weakest_step(self, science_graph):
         # hop0 is the least certain step (0.5); its runner-up DEVELOPED:in is tried.
         model = ScriptedModel(
-            choices=["count", "anchor", "BORN_IN:in", "stop", "none"] * 2,
-            probs=[0.9, 0.9, 0.5, 0.9, 0.9] * 2,
+            choices=["count", "BORN_IN:in", "stop", "none"] * 2,
+            probs=[0.9, 0.5, 0.9, 0.9] * 2,
             nouls=[0.2, 0.9],
         )
         result = _run(science_graph, model, AE1, ["Calculus"])
@@ -52,19 +52,19 @@ class TestCheckAndRepair:
         assert result.names == ["Gottfried Leibniz"]
 
     def test_failed_repair_returns_none(self, science_graph):
-        model = ScriptedModel(choices=["count", "anchor", "BORN_IN:in", "stop"] * 2,
-                              probs=[0.9, 0.9, 0.5, 0.9] * 2, nouls=[0.2, 0.2])
+        model = ScriptedModel(choices=["count", "BORN_IN:in", "stop"] * 2,
+                              probs=[0.9, 0.5, 0.9] * 2, nouls=[0.2, 0.2])
         assert _run(science_graph, model, AE1, ["Calculus"]) is None
 
     def test_low_confidence_plan_is_not_checked(self, science_graph):
-        model = ScriptedModel(choices=["count", "anchor", "DEVELOPED:in", "stop"], prob=0.2)
+        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"], prob=0.2)
         assert _run(science_graph, model, AE1, ["Calculus"], min_confidence=0.3) is None
         assert model.noul_calls == 0
 
 
 class TestFactsAndAnswers:
     def test_count_answer_names_the_entities(self, science_graph):
-        model = ScriptedModel(choices=["count", "anchor", "DEVELOPED:in", "stop"], nouls=[0.9])
+        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"], nouls=[0.9])
         result = _run(science_graph, model, AE1, ["Calculus"])
         assert result.answer.startswith("1 ")
         assert "Gottfried Leibniz" in result.answer
@@ -84,7 +84,7 @@ class TestFactsAndAnswers:
         assert "BORN_IN" in result.answer
 
     def test_truncated_list_does_not_claim_completeness(self, science_graph):
-        model = ScriptedModel(choices=["list", "anchor", "any:out", "stop"], nouls=[0.9])
+        model = ScriptedModel(choices=["list", "any:out", "stop"], nouls=[0.9])
         with _model(model):
             executor = AggregateExecutor(science_graph, GuidedQueryPlanner(science_graph, row_limit=2))
             result = executor.run("Newton neyle ilişkili?", ["Isaac Newton"])
@@ -94,7 +94,7 @@ class TestFactsAndAnswers:
         assert "more" in result.answer
 
     def test_empty_result_is_reported_not_failed(self, science_graph):
-        model = ScriptedModel(choices=["list", "anchor", "BORN_IN:out", "BORN_IN:in", "stop"],
+        model = ScriptedModel(choices=["list", "BORN_IN:out", "BORN_IN:in", "stop"],
                               nouls=[0.9, 0.9])
         result = _run(science_graph, model, "Einstein'ın doğduğu yerde doğan başka kim var?",
                       ["Albert Einstein"])
@@ -107,7 +107,7 @@ class TestFailures:
     def test_db_error_returns_none(self, science_graph, caplog):
         db = MagicMock(wraps=science_graph)
         db.run_read_query.side_effect = RuntimeError("disk gone")
-        model = ScriptedModel(choices=["count", "anchor", "DEVELOPED:in", "stop"], nouls=[0.9])
+        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"], nouls=[0.9])
         with caplog.at_level(logging.WARNING):
             assert _run(db, model, AE1, ["Calculus"]) is None
         assert "disk gone" in caplog.text
