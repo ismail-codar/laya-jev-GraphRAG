@@ -249,7 +249,16 @@ db.top_by_degree(rel_type=None, k=3)
 # → [{"name": "Isaac Newton", "degree": 4}, {"name": "General Relativity", "degree": 3}, ...]
 ```
 
-### Örnek: çok seviyeli, çok metrikli agregasyon
+### Örnek: "Her bilim insanının bağlantılarını türüne göre özetle: kaç bağlantısı var ve bağlandığı konular ne kadar merkezi?"
+
+Çok seviyeli, çok metrikli agregasyon. Teknik ifadesi şu: topluluk → varlık → ilişki tipi seviyesinde kenar sayısı ve hedef `pagerank` istatistikleri. Sorunun parçaları sorguya şöyle karşılık gelir:
+
+- "Her bilim insanının" → `s.name` (seviye 2), topluluk içinde (`s.communityId`, seviye 1)
+- "türüne göre" → `r.type` (seviye 3)
+- "kaç bağlantısı var" → `COUNT(*)`, kaç farklı hedef → `COUNT(DISTINCT t.name)`
+- "konular ne kadar merkezi" → `t.pagerank` üzerinde `SUM` / `AVG` / `MIN` / `MAX`
+
+Aynı agregasyon kalıbına düşen diğer doğal sorular aşağıda, "Doğal dil karşılıkları" bölümünde.
 
 > **Mevcut şablonlarla yapılamaz.** Bu sorgu elle yazılmış Cypher'dır. Yukarıdaki iki şablon (`aggregate_edges`, `top_by_degree`) bunu ifade edemez:
 >
@@ -307,6 +316,41 @@ Sonuçlar, quickstart'ın ürettiği `examples/.kuzu_demo` üzerinde çalıştı
 - **Roll-up, bir seviyeyi `RETURN`'den çıkarmakla yapılır.** Community + Subject seviyesinde Newton `EdgeCount=4`, General Relativity 3, Einstein 2. Community + RelationType seviyesinde `BORN_IN=3`, `DISCOVERED=2`, diğerleri 1. Yalnız Community seviyesinde tek grup, 12 kenar.
 - **Daha anlamlı bir metrik hesaplanıyor ama saklanmıyor.** Laya'nın kenar doğrulama skoru (`P`, `examples/laya_kuzu_quickstart.py:90`) hesaplanıyor, fakat `upsert_edge` bu skoru kenara yazmıyor. `RELATES_TO` tablosuna bir `support DOUBLE` kolonu eklenirse `AVG(r.support)` / `MIN(r.support)` "hangi özne/ilişki grubunun kanıtı en zayıf" sorusunu cevaplayabilir.
 - **Şablona dönüştürülebilir.** Gruplama anahtarları sabit bir whitelist'ten seçilirse (`communityId`, `name`, `type`), bu sorgu `aggregate_edges` ile aynı güvenlik modeline sahip bir `group_edges(keys, metrics)` şablonu olur.
+
+#### Doğal dil karşılıkları
+
+Kullanıcılar bu sorguyu nadiren tek parça sorar. Genelde bir gruplama anahtarı, bir metrik ve bazen bir anchor içeren daha dar sorular gelir. Şemada varlık tipi (`Person`, `City`) yok. Bu yüzden "bilim insanı" rolü `BORN_IN` kenarının kaynağı, "şehir" rolü hedefi, "eser" rolü ise `AUTHORED` hedefi üzerinden çıkarılıyor. Aşağıdaki sorular `examples/.kuzu_demo` üzerinde çalıştırıldı.
+
+| # | Doğal soru | Kalıp | Demo sonucu |
+| --- | --- | --- | --- |
+| 1 | "Hangi şehirde kaç bilim insanı doğmuş?" | `BORN_IN` hedefine göre grupla, `COUNT(DISTINCT kaynak)` | Ulm 1, Woolsthorpe 1, Calculus 1 (*) |
+| 2 | "Bilim insanlarının yazdığı eserleri doğum yerlerine göre say." | 2 kenar tipi: `BORN_IN` ile grupla, `AUTHORED` için `OPTIONAL MATCH` + `COUNT` | Woolsthorpe/Newton 1, Ulm/Einstein 0 |
+| 3 | "Einstein'la aynı şehirde doğan başka bilim insanı var mı? Varsa kaçar eser yazmışlar?" | Anchor, 2 atlama (`e→şehir←p`, `p ≠ e`), ardından `AUTHORED` sayımı | Boş sonuç. Ulm'da başka kimse yok |
+| 4 | "Kim kaç katkı yapmış? Keşif, geliştirme ve yazılan eserleri ayrı ayrı göster." | İlişki tipi whitelist'i (`IN [...]`), özneye göre `COUNT` + `collect(r.type)` | Einstein, Leibniz, Newton, LIGO: 1'er |
+| 5 | "Evrensel Kütleçekimi'ne hangi kavramlar hangi ilişkiyle bağlanıyor?" | Gelen kenarlar, ilişki tipine göre grupla | `EXTENDS`: General Relativity, `RELATED_TO`: Principia Mathematica |
+| 6 | "En merkezi konularla ilgilenen üç varlık hangisi?" | Özneye göre grupla, `AVG(t.pagerank)` ile sırala, `LIMIT 3` | Principia 0.1306, LIGO 0.1209, Leibniz 0.1106 |
+| 7 | "Bilim insanlarının çalışmaları başka hangi kavramlara yol açmış?" | 2 atlama (`kişi→çalışma→kavram`), `(kişi, çalışma)` ikilisine göre `COUNT` | Einstein/General Relativity 3 (`EXTENDS`, `EXPLAINS`, `PREDICTED`) |
+| 8 | "Birden fazla yerde doğmuş görünen biri var mı?" | `BORN_IN` için özneye göre grupla, `COUNT(DISTINCT t) > 1` | Newton 2 (Woolsthorpe, Calculus). Veri kalitesi kontrolü |
+
+(*) `Calculus` şehir değil. Newton → Calculus `DEVELOPED` kenarı `BORN_IN` olarak yanlış hizalandığı için şehir listesine giriyor (bkz. yukarıdaki hizalama notu). Soru 8 tam da bu hatayı yakalar.
+
+Soru 2 ve 3'ün Cypher karşılığı (Kùzu 0.11.3'te doğrulandı):
+
+```cypher
+// 2: doğum yerine göre eser sayısı
+MATCH (p:Entity)-[b:RELATES_TO]->(c:Entity) WHERE b.type = 'BORN_IN'
+OPTIONAL MATCH (p)-[a:RELATES_TO]->(w:Entity) WHERE a.type = 'AUTHORED'
+RETURN c.name AS City, p.name AS Scientist, COUNT(w) AS Works
+ORDER BY City, Scientist;
+
+// 3: anchor ile aynı şehirde doğanlar ve eser sayıları
+MATCH (e:Entity {name: 'Albert Einstein'})-[b1:RELATES_TO]->(c:Entity)<-[b2:RELATES_TO]-(p:Entity)
+WHERE b1.type = 'BORN_IN' AND b2.type = 'BORN_IN' AND p.name <> e.name
+OPTIONAL MATCH (p)-[a:RELATES_TO]->(w:Entity) WHERE a.type = 'AUTHORED'
+RETURN c.name AS City, p.name AS Scientist, COUNT(w) AS Works;
+```
+
+Bu soruların hiçbiri mevcut iki şablonla tam karşılanamıyor. 1, 5, 6 ve 8 tek atlamalı olduğu için `group_edges` ile karşılanabilir. 2, 3 ve 7 ise iki kenar tipini zincirliyor, yani `group_edges`'in de ötesinde bir yol (path) şablonu ya da guided planner gerektiriyor.
 
 ### Önerilen genişletme: `group_edges` ve yapısal filtreler
 
