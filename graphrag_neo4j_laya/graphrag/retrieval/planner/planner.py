@@ -155,8 +155,14 @@ class _Planning:
             if not moves:
                 self.forced(step, "stop")
                 return
-            selected = self.choose(step, _HOP_INSTRUCTION,
-                                   candidates.hop_options(self.plan, moves, self.p.relation_schema))
+            options = candidates.hop_options(self.plan, moves, self.p.relation_schema)
+            # An anchored plan that stops before its first hop returns the
+            # anchor itself, which answers no aggregate question. Measured:
+            # offered `stop` here, the model took it — anchoring the start
+            # halved hop accuracy because the plans came out zero-hop.
+            if i == 0 and self.plan.start:
+                options.pop("stop")
+            selected = self.choose(step, _HOP_INSTRUCTION, options)
             if selected == "stop":
                 return
             rel_type, direction = selected.split(":")

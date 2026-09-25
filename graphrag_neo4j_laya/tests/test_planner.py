@@ -32,7 +32,7 @@ class TestAcceptancePlans:
         assert result.plan.start == "Calculus"
         assert result.plan.hops == [Hop("DEVELOPED", "in")]
         # Only moves that exist on Calculus are offered.
-        assert set(model.choice_calls[1]) == {"DEVELOPED:in", "BORN_IN:in", "any:in", "stop"}
+        assert set(model.choice_calls[1]) == {"DEVELOPED:in", "BORN_IN:in", "any:in"}
 
     def test_ae2_group_by_relation_type(self, science_graph):
         model = ScriptedModel(choices=["group", "any:out", "stop", "count"],
@@ -79,7 +79,7 @@ class TestStartStep:
         ("isaac newton kaç eser yazdı?", "Isaac Newton"),                # case
     ])
     def test_forms_that_count_as_naming_the_seed(self, science_graph, question, seed):
-        result = _plan(science_graph, ScriptedModel(choices=["count", "stop"]), question, [seed])
+        result = _plan(science_graph, ScriptedModel(choices=["count"]), question, [seed])
         assert result.plan.start == seed
 
     def test_a_longer_word_does_not_match_a_short_name(self, science_graph):
@@ -96,6 +96,23 @@ class TestStartStep:
 
 
 class TestHopLoop:
+    def test_an_anchored_plan_is_not_offered_stop_at_hop0(self, science_graph):
+        # Stopping before the first hop would return the anchor itself.
+        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"])
+        result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus"])
+        assert result.plan.start == "Calculus"
+        assert "stop" not in model.choice_calls[1]
+        assert "stop" in model.choice_calls[2]          # still offered from hop1 on
+        assert result.plan.hops == [Hop("DEVELOPED", "in")]
+
+    def test_an_unanchored_plan_may_stop_at_hop0(self, science_graph):
+        # A zero-hop plan over the whole graph is a real answer ("how many
+        # entities are there?"), so `stop` stays on the table.
+        model = ScriptedModel(choices=["count", "stop"])
+        result = _plan(science_graph, model, "Graph'ta kaç varlık var?", [])
+        assert "stop" in model.choice_calls[1]
+        assert result.plan.hops == []
+
     def test_empty_frontier_forces_stop_without_asking(self, science_graph):
         model = ScriptedModel(choices=["list"])
         result = _plan(science_graph, model, "Banana Bread neyle ilişkili?", ["Banana Bread"])
@@ -198,7 +215,7 @@ class TestTraceAndFailures:
         assert result.plan.hops == [Hop("BORN_IN", "in")]
         hop0 = next(t for t in result.trace if t.step == "hop0")
         # The overridden option keeps the probability the model gave it.
-        assert hop0.overridden and hop0.probability == pytest.approx(0.2 / 3)
+        assert hop0.overridden and hop0.probability == pytest.approx(0.2 / 2)
 
     def test_model_error_returns_none(self, science_graph):
         class Broken(ScriptedModel):

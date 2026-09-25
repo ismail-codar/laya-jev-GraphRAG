@@ -726,7 +726,7 @@ Yöntem 1–3'teki sabit şablonlar yerine sorguyu **adım adım** kurar. Her ad
 
 1. İşlem (`Choice`): `count`, `list`, `rank`, `group`.
 2. Başlangıç (**kod**): seed'in adı soruda geçiyorsa o varlık, geçmiyorsa bütün graph. Model'e sorulmaz; eşleşme kelime sınırında yapılır, Türkçe'de kesme işaretiyle gelen ekler sınır sayılır ("Calculus'a"), çok kelimeli adlar son kelimesiyle de eşleşir ("Einstein'ın"). Gerekçe ölçümde: `Choice` olarak sorulduğunda model, seed'ini adıyla anan 14 sorunun hepsinde "bütün graph" dedi.
-3. Hop döngüsü (`Choice`, en fazla `aggregate_max_hops=3`): seçenekler o anki sınırdan (frontier) **gerçekten çıkan** ilişki tipi × yön çiftleri, bir yönde birden fazla tip varsa `any:<yön>`, ve `stop`. Graph'ta olmayan bir ilişki ya da yön seçilemez.
+3. Hop döngüsü (`Choice`, en fazla `aggregate_max_hops=3`): seçenekler o anki sınırdan (frontier) **gerçekten çıkan** ilişki tipi × yön çiftleri, bir yönde birden fazla tip varsa `any:<yön>`, ve `stop`. Graph'ta olmayan bir ilişki ya da yön seçilemez. Anchor'lı planlarda `stop` **hop0'da sunulmaz**: sıfır hop'luk bir anchor planı anchor'ın kendisini döndürür, yani hiçbir agregasyon sorusunu cevaplamaz. Ölçümdeki en büyük tek kazanç bu kısıt (aşağıda).
 4. Filtreler: iki ve daha fazla hop'ta başlangıç varlığını hariç tutma (`Noul`); soruda sayı varsa sayısal filtre (alan, operatör ve değer; değer sorudan regex ile çıkar).
 5. Şekil (`group` / `rank`): gruplama anahtarları tek `ask_batch` çağrısıyla, metrik `Choice` ile (`count`, `count_distinct`, düğüm `pagerank`'i üzerinde `sum`/`avg`/`min`/`max`, ve yalnız `group` planlarında adım başına `collect:e<i>.type`; liste sıralanamadığı için `rank`'e sunulmaz); `rank` için `limit` sorudaki sayıdan; soruda sayı varsa `HAVING`.
 6. Anlamsal filtre (`Choice`, kapalı liste): `none`, `person`, `theory`, `place`, `work`, `organisation`, `phenomenon`. Seçilirse Yöntem 5 çalışır: adaylar DB'den gelir, her biri `Noul` ile bantlanır (≥ 0,70 kesin, ≤ 0,30 hayır) ve kesin küme `IN` filtresi olarak plana eklenir. Sonuç `[kesin, kesin + belirsiz]` aralığıdır.
@@ -752,42 +752,44 @@ Yöntem 1–5'in yapamadığı çok adımlı yol filtreleri de bu yolla ifade ed
 
 Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `examples/data/aggregate_eval.json`, 34 soru: 10 basit, 7 gruplu / filtreli, 4 iki hop'lu, 3 anlamsal filtreli agregasyon, ve 10 agregasyon olmayan soru; 14'ü Türkçe. Seed'ler setten gelir, yani seed seçim hataları sayılara karışmaz. Laya `multilingual` checkpoint, CPU, 2026-09-25.
 
-> Aşağıdaki tablo, başlangıç adımı koda alındıktan sonraki ölçüm. Parantezdeki değerler bir
-> önceki ölçüm (aynı 34 soruluk set, başlangıç adımı hâlâ `Choice`).
+> Aşağıdaki tablo iki değişiklikten sonraki ölçüm: başlangıç adımı koda alındı ve anchor'lı
+> planlarda `stop` hop0'da sunulmuyor. Parantezdeki değerler, yalnız başlangıç değişikliğinin
+> olduğu bir önceki ölçüm — yani parantezler `stop` kısıtının tek başına etkisini gösteriyor.
 
 | Ölçüm | Sonuç | Bayrak hedefi |
 | --- | --- | --- |
 | İşlem doğruluğu | %70,8 (değişmedi) | |
-| Başlangıç doğruluğu | **%100** (önce %41,7) — artık kod kararı | |
-| Hop tipi / yön / durma | **%8,3** / %8,3 / **%12,5** (önce %16,7 / %8,3 / %25,0) | yön ≥ %90 |
+| Başlangıç doğruluğu | %100 — kod kararı | |
+| Hop tipi / yön / durma | **%37,5 / %50,0 / %54,2** (önce %8,3 / %8,3 / %12,5) | yön ≥ %90 |
 | Filtre / anahtar / metrik / `HAVING` | %83,3 / %75,0 / %66,7 / %91,7 (değişmedi) | |
-| Anlamsal filtre adımı | **%70,8** (önce %83,3) | |
-| Tam plan eşleşmesi | %0 (0 / 24) | |
-| Sonuç eşleşmesi | %8,3 (2 / 24, ikisi de yanlış planla tesadüfen) | ≥ %80 |
+| Anlamsal filtre adımı | **%79,2** (önce %70,8) | |
+| Tam plan eşleşmesi | **%12,5** (3 / 24 — önce 0) | |
+| Sonuç eşleşmesi | **%16,7** (4 / 24, 3'ü tam doğru planla — önce %8,3, ikisi de tesadüfen) | ≥ %80 |
 | Agregasyon sorusunu `aggregate`'e yönlendirme | %37,5 (değişmedi) | |
 | Yanlış yönlendirme (agregasyon olmayan → `aggregate`) | %10 (1 / 10) | %0 |
 | Geri çeviri kontrolü: doğru planı geçirme / yanlış planı reddetme | %50,0 / %66,7 (değişmedi) | |
-| Min ve çarpım güveninin ayırma gücü | ölçülemedi (hiç doğru plan yok) | |
-| Dil kırılımı (sonuç eşleşmesi) | en %0,0 · tr %20,0 (önce %7,1 · %10,0) | |
-| Gecikme (ortalama) | yönlendirme 0,25 sn · plan 1,24 sn | |
-| Soru başına çağrı | **3,5** `Choice` (önce 4,1) · 1,5 `Noul` · 0,1 `ask_batch` | |
+| Min ve çarpım güveninin ayırma gücü | **min %87,3 · çarpım %77,8** (ilk kez ölçülebildi) | |
+| Dil kırılımı (tam plan · sonuç) | en %14,3 · %14,3 — tr %10,0 · %20,0 | |
+| Gecikme (ortalama) | yönlendirme 0,19 sn · plan 0,95 sn | |
+| Soru başına çağrı | 3,9 `Choice` · 1,5 `Noul` · 0,1 `ask_batch` | |
 
 Üç bayrak hedefinin üçü de tutmadı. Router rotası kapalı kalır.
 
 ### Bulgular
 
-- **Başlangıç adımı çözüldü, ama hiçbir şeyi açmadı.** `Choice` olarak sorulduğunda Laya, seed'ini adıyla anan 14 sorunun hiçbirinde seed'i seçmiyordu ("How many places was Isaac Newton born in?" için P(bütün graph) = 0,995; iki farklı ifadeyle denendi, seed hatırlama 8 soruda 0–2'de kaldı). Adım koda alınınca doğruluk %100 oldu ve soru başına çağrı 4,1'den 3,5'e indi. **Ama sonraki adımların hiçbiri düzelmedi**: hop tipi %16,7 → %8,3, durma %25,0 → %12,5, anlamsal filtre %83,3 → %70,8. "Başlangıç yanlış olunca sonraki bütün hop'lar da yanlış oluyor" varsayımı yanlışmış; hop adımı bağımsız olarak zayıf.
-- **Anchor konunca model hemen duruyor.** Gerileyen beş sorunun (s07, s08, s09, g01, g05) hepsi seed'li. Örnek s07, "List all entities that discovered Gravitational Waves", altın plan `DISCOVERED:in`: önce bütün graph'tan başlayıp bir hop atıyor ve tipi tutturuyordu; şimdi `Gravitational Waves` üzerinde başlayıp **hop0'da `stop`** diyor, sıfır hop'luk bir plan kuruyor ve üstüne gereksiz bir anlamsal filtre ekliyor. `stop` açıklaması ("şu ana kadar ulaşılan varlıklar sorunun sorduğu varlıklar") frontier tam da anchor'ken fazla doğru görünüyor. Yani eski ölçümdeki hop isabetleri, yanlış frontier'ın farklı bir seçenek listesi sunmasının yan ürünüymüş.
-- **Hop seçimi yazı-tura düzeyinde.** Örnek: `BORN_IN:out` 0,36, `BORN_IN:in` 0,34. Yön %8,3'te sabit; bayrak hedefi %90.
+- **Başlangıç adımı koda alındı, tek başına hiçbir şeyi açmadı.** `Choice` olarak sorulduğunda Laya, seed'ini adıyla anan 14 sorunun hiçbirinde seed'i seçmiyordu ("How many places was Isaac Newton born in?" için P(bütün graph) = 0,995; iki farklı ifadeyle denendi, seed hatırlama 8 soruda 0–2'de kaldı). Adım koda alınınca doğruluk %100 oldu, ama sonraki adımların hiçbiri düzelmedi; hop tipi %16,7'den %8,3'e, durma %25,0'ten %12,5'e **düştü**. "Başlangıç yanlış olunca sonraki bütün hop'lar da yanlış oluyor" varsayımı yanlışmış.
+- **Gerçek sebep `stop` seçeneğiydi.** Gerileyen beş sorunun (s07, s08, s09, g01, g05) hepsi seed'liydi ve hepsinde aynı şey oluyordu: anchor konunca model **hop0'da `stop`** diyor, sıfır hop'luk bir plan kuruyordu. Örnek s07, "List all entities that discovered Gravitational Waves", altın plan `DISCOVERED:in`: `Gravitational Waves` üzerinde başlayıp hiç hop atmadan duruyor, üstüne gereksiz bir anlamsal filtre ekliyordu. `stop` açıklaması ("şu ana kadar ulaşılan varlıklar sorunun sorduğu varlıklar") frontier tam da anchor'ken fazla doğru görünüyor.
+- **`stop`'u anchor'lı planların hop0'ında sunmamak ölçümdeki en büyük kazanç.** Sıfır hop'luk bir anchor planı zaten anchor'ın kendisini döndürüyor, yani hiçbir agregasyon sorusunu cevaplayamıyor; setteki sıfır hop'lu altın planların hepsi de anchor'sız. Kısıt konunca **hop tipi %8,3 → %37,5, yön %8,3 → %50,0, durma %12,5 → %54,2**, anlamsal filtre %70,8 → %79,2. Hiçbir adım gerilemedi. Tam plan eşleşmesi ilk kez sıfırdan çıktı (%12,5; s01, s09, s10) ve sonuç eşleşmesi ikiye katlandı — üstelik artık 4 isabetin 3'ü tam doğru plandan geliyor, önceki 2 isabetin ikisi de tesadüftü.
+- **Hop seçimi hâlâ ölçümün zayıf halkası.** Yön %50,0, bayrak hedefi %90. İki hop'lu dört sorunun hiçbiri tam tutmuyor.
+- **KTD5 doğrulandı.** Doğru plan çıkmaya başlayınca güven ayırma gücü ilk kez ölçülebildi: en zayıf adım %87,3, adım olasılıklarının çarpımı %77,8. Yani "plan güveni çarpım değil, en zayıf adımdır" kararı ölçümle destekleniyor.
 - **Geri çeviri kontrolü zayıf bir ayırıcı.** Doğru planların yarısını reddediyor, yanlışların üçte birini geçiriyor. Onarım adımı bu yüzden az işe yarıyor.
 - **İşlem, filtre ve `HAVING` adımları görece iyi**, ama bu adımların çoğu soruda "yok" cevabı bekleniyor; yüksek oran kısmen bundan geliyor.
 - **`collect` seçeneğine sıra gelmedi.** Yeni `g07` sorusunda ("Her varlık hangi ilişki tiplerini kullanıyor?") Laya işlem adımında `group` yerine `list` seçti; `list` planlarında şekil adımı hiç çalışmadığı için metrik `Choice`'ı — dolayısıyla `collect` seçeneğini — görmedi. Ardından 3 hop'luk anlamsız bir yol kurdu (`RELATED_TO:in`, `RELATED_TO:out`, `EXTENDS:in`), plan güveni 0,17. Yani yeni metrik ölçülebilmiş değil: önündeki işlem adımı tıkalı.
-- **Gecikme ölçümler arasında 3–4 kat oynuyor** (plan 3,8 → 0,88 → 1,24 sn). Kod yolu aynı; fark ölçüm anındaki makine yüküne benziyor, ayrıca araştırılmadı. Mutlak değerden çok sıralama anlamlı: plan kurma yönlendirmenin ~5 katı.
-- **Mimari beklendiği gibi çalışıyor:** bütün geçersiz hamleler yapısal olarak engelleniyor, üretilen her plan geçerli Cypher'a dönüşüyor, boş ve kesilmiş sonuçlar doğru raporlanıyor (243 birim testi).
+- **Gecikme ölçümler arasında 3–4 kat oynuyor** (plan 3,8 → 0,88 → 1,24 → 0,95 sn). Kod yolu aynı; fark ölçüm anındaki makine yüküne benziyor, ayrıca araştırılmadı. Mutlak değerden çok sıralama anlamlı: plan kurma yönlendirmenin ~5 katı.
+- **Mimari beklendiği gibi çalışıyor:** bütün geçersiz hamleler yapısal olarak engelleniyor, üretilen her plan geçerli Cypher'a dönüşüyor, boş ve kesilmiş sonuçlar doğru raporlanıyor (245 birim testi).
 
 ### Sonraki denemeler (ölçülmedi)
 
-- `stop`'u hop0'da hiç sunmamak, ya da açıklamasını anchor durumundan ayırmak. Ölçümdeki tek net sebep-sonuç bu: anchor konunca model sıfır hop'luk plan kuruyor.
 - Hop adımında `Choice` yerine seçenek başına `Noul` sormak ve ilişki açıklamasını yönle birlikte cümle olarak vermek.
 - İşlem adımını sağlamlaştırmak: `g07`'de `group` yerine `list` seçildiği için metrik `Choice`'ına — dolayısıyla `collect` seçeneğine — hiç sıra gelmiyor.
 - Aynı düzenekle Jev backend'ini ölçmek (`DECISION_MODEL_BACKEND=jev`).
