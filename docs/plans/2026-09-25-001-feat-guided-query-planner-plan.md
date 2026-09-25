@@ -42,7 +42,7 @@ Laya bir sınıflandırıcı. Metin veya sayı üretemez, ama kodun sunduğu ada
 
 **Plan kurma**
 
-- R1. Planlayıcı başlangıç kümesini seçer: soru bir varlık adı içeriyorsa `SeedSelector`'dan gelen varlık, içermiyorsa tüm `Entity` düğümleri.
+- R1. Planlayıcı başlangıç kümesini seçer: soru bir varlık adı içeriyorsa `SeedSelector.select()` sonucundaki ilk (en iyi eşleşen) isim, içermiyorsa tüm `Entity` düğümleri.
 - R2. Her hop adımında adaylar, mevcut frontier'da gerçekten var olan `(ilişki tipi, yön)` çiftleri ve "dur" seçeneğidir. Laya bunlardan birini seçer. En fazla 3 hop yapılır.
 - R3. Filtre adayları şemada var olan alanlardan gelir: `name`, `pagerank`, `communityId`, `type`. Filtre değerlerini kod üretir: sayılar sorudan regex ile, isimler seed'lerden, kategorik değerler DB'deki `DISTINCT` değerlerden. Laya sadece seçer.
 - R4. İşlem (`count`, `list`, `rank`, `group`), gruplama anahtarları, metrikler (`count`, `count_distinct`, `sum`, `avg`, `min`, `max`), `having`, sıralama ve limit plan içinde ifade edilebilir.
@@ -56,14 +56,14 @@ Laya bir sınıflandırıcı. Metin veya sayı üretemez, ama kodun sunduğu ada
 
 **Entegrasyon**
 
-- R9. Router'a bir `aggregate` niyeti eklenir. Bu niyet yalnızca bayrak açıkken ve güven eşiğin üstündeyken kullanılır; aksi halde soru mevcut rotalara gider.
+- R9. Router'a bir `aggregate` niyeti eklenir. Bu niyet yalnızca bayrak açıkken ve router güveni `aggregate_route_min_confidence` eşiğinin üstündeyken kullanılır; aksi halde soru mevcut rotalara gider.
 - R10. Agregasyon sonucu, fact düğümleri olarak mevcut sentez ve `verify_citations` akışına girer. Rerank ve hallucination gate bu yolda atlanır. Varsayılan cevap modu LLM'siz şablondur.
 - R11. Router'ı atlayan açık bir API sunulur. Bununla bir soru doğrudan planlayıcıya verilebilir; ölçüm ve analitik kullanım için gereklidir.
 - R12. Planlayıcı hiçbir durumda pipeline'ı çökertmez. DB veya model hatasında mevcut rotaya döner ve durumu loglar.
 
 **Ölçüm**
 
-- R13. Etiketli bir soru seti ve ölçüm düzeneği adım bazında doğruluk raporlar: işlem, başlangıç, hop, yön, dur, filtre, metrik, tüm planın tam eşleşmesi ve yanlış yönlendirme oranı.
+- R13. Etiketli bir soru seti ve ölçüm düzeneği adım bazında doğruluk raporlar: işlem, başlangıç, hop, yön, dur, filtre, metrik, tüm planın tam eşleşmesi, yanlış yönlendirme oranı, ve geri çeviri kontrolünün kendi isabeti (doğru planı geçirme ve yanlış planı reddetme oranı, dil kırılımıyla).
 
 **Anlamsal filtre**
 
@@ -72,7 +72,7 @@ Laya bir sınıflandırıcı. Metin veya sayı üretemez, ama kodun sunduğu ada
 ### Acceptance Examples
 
 - AE1. **Given** quickstart graph'ı, **when** "Calculus'u kaç kişi geliştirdi?" sorulursa, **then** plan `Calculus` düğümünden başlar, gelen yönde bir hop seçer ve `count_distinct` hesaplar; cevap o ilişki tipi altında graph'ta kayıtlı kişi sayısını verir. Quickstart'taki hizalama hatası yüzünden Newton'un kenarı `BORN_IN` altında durduğu için beklenen sonuç 1 kişidir (Leibniz). Doğrulama setinde bu beklenti elle yazılır.
-- AE2. **Given** quickstart graph'ı, **when** "Her ilişki tipinde kaç kenar var?" sorulursa, **then** plan tüm düğümlerden başlar, 1 hop yapar, `relation` anahtarına göre gruplar ve `count` hesaplar. Sonuç `AGGREGATION_METHODS.md`'deki roll-up değerleriyle aynıdır (`BORN_IN=3`, `DISCOVERED=2`, diğerleri 1).
+- AE2. **Given** quickstart graph'ı, **when** "Her ilişki tipinde kaç kenar var?" sorulursa, **then** plan tüm düğümlerden başlar, 1 hop yapar, kenarın `type` alanına (ilişki tipi) göre gruplar ve `count` hesaplar. Sonuç `AGGREGATION_METHODS.md`'deki roll-up değerleriyle aynıdır (`BORN_IN=3`, `DISCOVERED=2`, diğerleri 1).
 - AE3. **Given** quickstart graph'ı, **when** "Einstein'ın doğduğu yerde doğan başka kim var?" sorulursa, **then** plan iki hop kurar (`BORN_IN` giden, sonra `BORN_IN` gelen) ve Einstein'ı sonuçtan çıkarır. Graph'ta böyle biri olmadığı için sonuç boş küme olur ve cevap "graph'ta kayıtlı kimse yok" der. Boş sonuç hata sayılmaz.
 - AE4. **Given** bayrak açık, **when** "Newton ile Einstein nasıl bağlantılı?" sorulursa, **then** router `aggregate` seçmez, ya da düşük güvenle seçer ve soru `multi_hop` rotasına düşer.
 - AE5. **Given** herhangi bir soru, **when** planın en zayıf adımı `aggregate_min_confidence` eşiğinin altında kalırsa, **then** planlayıcı sonuç döndürmez ve pipeline eski rotayla devam eder.
@@ -100,7 +100,7 @@ Laya bir sınıflandırıcı. Metin veya sayı üretemez, ama kodun sunduğu ada
 
 - KTD1. **Plan metin değil, tipli bir ağaçtır.** Planlayıcı dataclass'lardan oluşan bir `QueryPlan` kurar; Cypher'ı yalnızca bir renderer üretir. Gerekçe: sözdizimi hatası imkânsız hale gelir, enjeksiyon yüzeyi whitelist'lerle sınırlanır, plan test edilebilir ve karşılaştırılabilir bir değer olur (Pangu'daki "geçerli-by-construction" ilkesi).
 - KTD2. **Hop adayları canlı veriden gelir.** Adaylar şemadan değil, frontier üzerinde çalışan bir `DISTINCT r.type` + yön sorgusundan çıkarılır. Gerekçe: Neo4j'nin Text2Cypher analizinde yön ve yanlış ilişki tipi hataları başlıca başarısızlık nedenleri. Sadece var olan hamleleri sunmak bu sınıfı yapısal olarak kapatır. Kùzu'da `type` bir string property olduğu için değer parametre olarak geçer; tanımlayıcı whitelist'i gerekmez.
-- KTD3. **Açıklamalar ilişki tipinin anlamını taşır.** Hop seçeneklerinin açıklamaları, veri setinin `schema` sözlüğünden (`examples/data/science_history.json`) veya `graphrag_neo4j_laya/graphrag/ingestion/ontology_aligner.py` içindeki `SCHEMA_EDGES`'ten gelir. Tanımsız bir tip için yedek açıklama tipin adıdır. Ayrıca yöne göre "X does it" veya "something does it to X" diye ifade edilir.
+- KTD3. **Açıklamalar ilişki tipinin anlamını taşır.** Hop seçeneklerinin açıklamalarının tek kaynağı, ingestion sırasında `OntologyAligner`'a verilen veri seti `schema` sözlüğüdür (örnek: `examples/data/science_history.json`). Bu sözlük ingestion sonrasında hiçbir yerde saklanmadığı için, sorgu anına bir ayarla verilen JSON yolu üzerinden bir ilişki açıklama kaydı olarak taşınır (U1). `ontology_aligner.py` içindeki `SCHEMA_EDGES` kaynak olarak kullanılmaz; quickstart'taki 9 tipin 6'sı orada yok. Tanımsız bir tip için yedek açıklama tipin adıdır. Ayrıca yöne göre "X does it" veya "something does it to X" diye ifade edilir.
 - KTD4. **Seçim greedy'dir, tek bir onarım adımı vardır.** Her adımda en olası seçenek alınır, ikinci aday trace'e yazılır. Geri çeviri kontrolü (R7) başarısız olursa, farkı en küçük adım ikinci adayla değiştirilerek tek bir alternatif plan denenir. Gerekçe: Pangu beam search kullanıyor, ama küçük graph ve ~33 ms'lik çağrı maliyetinde tek onarım basit kalıyor ve hatayı çoğunlukla yakalıyor. Beam genişliği ölçüm sonrasına bırakılır.
 - KTD5. **Plan güveni en zayıf adımdır, çarpım değil.** Repodaki "en zayıf iddia karar verir" deseniyle tutarlı. Laya olasılıkları kalibre olmadığı için çarpım, uzun planları yapay olarak cezalandırır.
 - KTD6. **Aynı state'i paylaşan sorular tek çağrıda sorulur.** Gruplama anahtarı ve filtre alanı soruları (her aday için bir `Noul`) `ask_batch` ile tek seferde gönderilir. Laya'da bu tek forward pass, Jev'de tek HTTP çağrısı demek. Her adımın context'i dar tutulur: soru + kısmi planın doğal dil hali. Gerekçe: dokümanlar, Laya'nın ilgisiz state'e duyarlı olduğunu söylüyor.
@@ -181,6 +181,7 @@ Tipik bir soru ~8–12 çağrı yapar; 33 ms/çağrı ile ~0,3–0,4 s. Frontier
 
 - Laya, Türkçe bir sorudaki niyeti İngilizce seçenek açıklamalarıyla eşleştirebilir. Bu ölçülmedi. U6'daki Türkçe alt küme bunu ölçer. Sonuç zayıf çıkarsa, seçenek açıklamalarına Türkçe karşılıklar eklemek ilk düzeltmedir.
 - Kùzu 0.11.3, açık hop'lu `MATCH`, `WITH ... WHERE` ve `count(DISTINCT)` kombinasyonlarını U2'deki test şekilleri için doğru çalıştırır. Bilinen WITH + DISTINCT hataları (#6049, #5040) U2 entegrasyon testleriyle erken yakalanır.
+- Laya olasılıkları kalibre değildir; KTD5'in "çarpım değil, en zayıf adım" kararı bu öncüle dayanır. Bu ölçülmedi. U6, aynı sorularda min ve çarpım tabanlı plan güvenini, doğru ve yanlış planları ayırma başarısı üzerinden karşılaştırır.
 
 ### Sequencing
 
@@ -211,6 +212,8 @@ U6, U5'ten önce veya onunla paralel yapılabilir. Goal Capsule'daki stop condit
 - **Files:**
   - `graphrag_neo4j_laya/graphrag/graph/base.py` (değiştir)
   - `graphrag_neo4j_laya/graphrag/graph/kuzu_client.py` (değiştir)
+  - `graphrag_neo4j_laya/graphrag/graph/relation_schema.py` (yeni)
+  - `graphrag_neo4j_laya/config/settings.py` (değiştir)
   - `graphrag_neo4j_laya/tests/conftest.py` (yeni)
   - `graphrag_neo4j_laya/tests/test_kuzu_introspection.py` (yeni)
 - **Approach:**
@@ -219,6 +222,7 @@ U6, U5'ten önce veya onunla paralel yapılabilir. Goal Capsule'daki stop condit
     - Kategorik değer adayları: bir alan için `DISTINCT` değerler, bir üst sınırla.
     - Salt-okur parametreli sorgu çalıştırma: satırları sütun adlarıyla sözlük olarak döndürür.
   - Salt-okur çalıştırıcı, kendisine gelen metnin sadece renderer'dan geldiğini varsayar. Yine de ikinci bir savunma hattı olarak yazma anahtar kelimelerini (`CREATE`, `SET`, `DELETE`, `MERGE`, `DROP`) reddeder.
+  - İlişki açıklama kaydı (KTD3): bir ayarla verilen JSON dosyasından `{type: description}` sözlüğünü okur. Ayar boşsa veya dosya yoksa boş sözlük döner ve bir uyarı loglanır. Quickstart ve fixture, `examples/data/science_history.json` içindeki `schema` alanını kullanır.
   - `conftest.py`, geçici bir dizinde bir `KuzuClient` açar. Quickstart verisinden, `AGGREGATION_METHODS.md`'deki tabloyu üreten 12 kenarlı graph'ı Laya kullanmadan doğrudan `upsert_edge` ile kurar; hizalama hataları dahil. Pagerank ve community NetworkX ile hesaplanır.
 - **Patterns to follow:** `kuzu_client.py`'deki `conn.execute(query, parameters=...)` kullanımı; `base.py`'deki `get_node_text` varsayılan metot deseni.
 - **Test scenarios:**
@@ -228,6 +232,7 @@ U6, U5'ten önce veya onunla paralel yapılabilir. Goal Capsule'daki stop condit
   - Var olmayan bir anchor boş liste döndürür, hata vermez.
   - `communityId` için `DISTINCT` değer adayları `[0]`; kenarı budanmış `Banana Bread`'in `NULL` değeri listede yer almaz.
   - Salt-okur çalıştırıcı `CREATE` içeren bir metni `ValueError` ile reddeder.
+  - İlişki açıklama kaydı quickstart schema'sından `BORN_IN` için "was born in a place" döndürür; ayar boşken boş sözlük döner ve hata vermez.
   - Parametreli bir `MATCH` doğru sütun adlarıyla sözlük satırları döndürür.
 - **Verification:** Fixture graph'ı testlerde kurulur ve frontier sonuçları dokümandaki sayılarla eşleşir.
 
@@ -252,7 +257,7 @@ U6, U5'ten önce veya onunla paralel yapılabilir. Goal Capsule'daki stop condit
 - **Patterns to follow:** `graphrag_neo4j_laya/AGGREGATION_METHODS.md` içindeki "Önerilen genişletme: `group_edges`" bölümünün whitelist yapısı.
 - **Test scenarios:**
   - AE1 planı beklenen Cypher'a ve parametrelere render olur; sorgu metninde kullanıcı değeri geçmez.
-  - AE2 planı (tüm düğümler, 1 hop, `relation` ile grupla, `count`) çalışır ve `BORN_IN=3`, `DISCOVERED=2` sonucunu verir (fixture ile entegrasyon).
+  - AE2 planı (tüm düğümler, 1 hop, kenar `type` ile grupla, `count`) çalışır ve `BORN_IN=3`, `DISCOVERED=2` sonucunu verir (fixture ile entegrasyon).
   - Çok seviyeli örnek (community × subject × relation, 6 metrik) çalışır ve dokümandaki 11 satırlık tabloyla birebir eşleşir. Bu, DISTINCT sıralama düzeltmesini de doğrular.
   - `having` (`count_distinct target > 1`) yalnızca Newton / `BORN_IN` satırını döndürür.
   - AE3 iki hop'lu planı çalışır, `name != $p` filtresiyle boş sonuç döndürür.
@@ -273,19 +278,19 @@ U6, U5'ten önce veya onunla paralel yapılabilir. Goal Capsule'daki stop condit
   - `graphrag_neo4j_laya/config/settings.py` (değiştir)
   - `graphrag_neo4j_laya/tests/test_planner.py` (yeni)
 - **Approach:**
-  - Adımlar sırasıyla: işlem → başlangıç (seed varsa anchor) → hop döngüsü (frontier sorgusu + `Choice`, "dur" dahil) → filtreler → dönüş şekli. Anlamsal filtre adımı U7'de eklenir.
+  - Adımlar sırasıyla: işlem → başlangıç (seed varsa `SeedSelector.select()` listesinin ilk ismi anchor olur) → hop döngüsü (frontier sorgusu + `Choice`, "dur" dahil) → filtreler → dönüş şekli. Anlamsal filtre adımı U7'de eklenir.
   - `candidates.py` sorudan kod ile değer adayları çıkarır: sayılar (tam sayı, ondalık, "0.1" / "0,1"), seed isimleri, DB `DISTINCT` değerleri. Laya'ya hiçbir zaman değer ürettirilmez.
   - Frontier boşsa veya `max_hops` dolduysa "dur" zorlanır.
   - Adım context'i: `"User question: … \nPlan so far: <kısmi planın doğal dil hali>"`.
   - Çoklu `Noul` soruları `ask_batch` ile gönderilir.
   - Çıktı: plan, trace (adım, seçenekler, seçilen, olasılık, ikinci aday, marj) ve plan güveni (en zayıf adım).
-  - Ayarlar: `aggregate_route_enabled` (False), `aggregate_min_confidence`, `aggregate_max_hops` (3), `aggregate_row_limit` (200), `aggregate_answer_mode` ("template").
+  - Ayarlar: `aggregate_route_enabled` (False), `aggregate_route_min_confidence` (router güveni için), `aggregate_min_confidence` (plan güveni için), `aggregate_max_hops` (3), `aggregate_row_limit` (200), `aggregate_answer_mode` ("template").
   - Decision model her fonksiyonda `get_decision_model()` ile alınır, böylece testlerde mock'lanabilir.
 - **Execution note:** Önce AE1 ve AE2 için, sırayla yanıt veren scripted bir mock decision model ile uçtan uca planlayıcı testi yazılsın; adım mantığı bu testler üzerinden şekillensin.
 - **Patterns to follow:** `graphrag_neo4j_laya/graphrag/retrieval/router.py`'deki `choice_detailed` kullanımı; `ontology_aligner.py`'deki düşük güvende yedek seçeneğe dönüş; `tests/test_laya.py`'deki `patch("<module>.get_decision_model")` deseni.
 - **Test scenarios:**
   - AE1: scripted seçimlerle plan `Calculus`'tan başlar, gelen yönde `DEVELOPED` hop'u yapar ve `count_distinct` metriğini taşır.
-  - AE2: seed yokken başlangıç "tümü" olur; `relation` anahtarı Noul batch'inde seçilen tek anahtardır.
+  - AE2: seed yokken başlangıç "tümü" olur; kenarın `type` alanı Noul batch'inde seçilen tek anahtardır.
   - AE3: iki hop kurulur, Einstein'ı dışlayan `name !=` filtresi eklenir.
   - Frontier boşken planlayıcı "dur" seçeneğini Laya'ya sormadan zorlar.
   - `max_hops=3` dolduğunda dördüncü hop sorulmaz.
@@ -333,7 +338,7 @@ U6, U5'ten önce veya onunla paralel yapılabilir. Goal Capsule'daki stop condit
 - **Approach:**
   - `QueryIntent.AGGREGATE` ve `_ROUTE_OPTIONS` içine bir açıklama eklenir. `route_detailed()` niyet ve güveni birlikte döndürür; `route()` onu sarmalar.
   - Bayrak kapalıyken router `aggregate` seçeneğini hiç sunmaz. Böylece mevcut yönlendirme davranışı birebir korunur.
-  - Pipeline'da, `aggregate` niyeti güven eşiğinin üstündeyse planlayıcı çalıştırılır. Sonuç `None` ise ikinci en olası niyetle mevcut akışa dönülür.
+  - Pipeline'da, `aggregate` niyetinin router güveni `aggregate_route_min_confidence` eşiğinin üstündeyse planlayıcı çalıştırılır. Sonuç `None` ise ikinci en olası niyetle mevcut akışa dönülür.
   - Aggregate dalı rerank, conflict çözümü ve gate adımlarını atlar. `template` modunda şablon cevap döner; `llm` modunda sentez ve `verify_citations` fact'lere karşı çalışır.
   - `query_aggregate(question)` public metodu router'ı atlayarak planlayıcı sonucunu (trace dahil) döndürür.
   - Ablation backend'inde `noul` ve `choice` olmadığı için planlayıcı devre dışı kalır; bu durum bir kez uyarı olarak loglanır.
@@ -360,7 +365,7 @@ U6, U5'ten önce veya onunla paralel yapılabilir. Goal Capsule'daki stop condit
 - **Approach:**
   - Set: ~30 soru. 10 basit agregasyon, 6 gruplu/filtreli, 4 iki hop'lu, 10 agregasyon olmayan (yanlış yönlendirme kontrolü için). Soruların üçte biri Türkçe. Her soru için beklenen niyet, plan (alan bazında) ve fixture üzerindeki beklenen sonuç elle yazılır.
   - Düzenek quickstart'taki env ayarlama desenini izler (settings import'undan önce env) ve fixture graph'ını kurar.
-  - Rapor: adım başına doğruluk (işlem, başlangıç, hop tipi, yön, dur, filtre, anahtarlar, metrikler), tam plan eşleşmesi, sonuç eşleşmesi, yanlış yönlendirme oranı, dil kırılımı, soru başına gecikme ve çağrı sayısı. Çıktı konsola bir tablo, diske JSON olarak yazılır.
+  - Rapor: adım başına doğruluk (işlem, başlangıç, hop tipi, yön, dur, filtre, anahtarlar, metrikler), tam plan eşleşmesi, sonuç eşleşmesi, yanlış yönlendirme oranı, dil kırılımı, soru başına gecikme ve çağrı sayısı. Ayrıca geri çeviri kontrolünün doğru planı geçirme ve yanlış planı reddetme oranı (bunun için her sorunun bilinen yanlış bir plan varyantı da kontrole verilir), ve min ile çarpım tabanlı plan güveninin doğru/yanlış planları ayırma başarısı karşılaştırması. Çıktı konsola bir tablo, diske JSON olarak yazılır.
   - Bayrağı açmak için hedefler: tam sonuç eşleşmesi ≥ %80, agregasyon olmayan sorularda yanlış yönlendirme %0, hop yönü doğruluğu ≥ %90. Bu hedefler DoD değil, U5 bayrağının açılma kararına girdidir.
 - **Execution note:** Düzenek önce scripted mock ile birim testiyle doğrulanır; sonra gerçek Laya ile manuel çalıştırılır ve sonuç rapora eklenir.
 - **Patterns to follow:** `graphrag_neo4j_laya/examples/laya_kuzu_quickstart.py` (env ayarı, graph kurulumu); `graphrag/benchmarks/laya_vs_jev.py` (bağımsız script yapısı).
