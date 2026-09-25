@@ -12,45 +12,10 @@ from unittest.mock import patch
 
 import pytest
 
-from graphrag.models.base_decision import DecisionResult
 from graphrag.retrieval.planner.candidates import extract_numbers
 from graphrag.retrieval.planner.plan import FieldRef, Filter, Hop, Metric
 from graphrag.retrieval.planner.planner import GuidedQueryPlanner
-
-
-def _result(primitive: str, selected: str | None, probs: dict[str, float]) -> DecisionResult:
-    score = probs[selected] if selected else probs["yes"]
-    return DecisionResult(score=score, confidence=score, raw_probs=probs, latency_ms=0.0,
-                          backend="scripted", primitive=primitive, selected=selected)
-
-
-class ScriptedModel:
-    """Answers Choice calls from a queue and Noul calls from a queue or a default."""
-
-    def __init__(self, choices: list[str] | None = None, nouls: list[float] | None = None,
-                 batch: dict[str, float] | None = None, prob: float = 0.9) -> None:
-        self.choices = list(choices or [])
-        self.nouls = list(nouls or [])
-        self.batch = batch or {}
-        self.prob = prob
-        self.choice_calls: list[dict[str, str]] = []
-        self.batch_calls = 0
-
-    def choice_detailed(self, context, instruction, options):
-        self.choice_calls.append(options)
-        selected = self.choices.pop(0) if self.choices else next(k for k in options if k != "stop")
-        assert selected in options, f"{selected!r} not offered; options were {list(options)}"
-        rest = (1.0 - self.prob) / max(len(options) - 1, 1)
-        return _result("choice", selected, {k: (self.prob if k == selected else rest) for k in options})
-
-    def noul_detailed(self, context, instruction):
-        p = self.nouls.pop(0) if self.nouls else 0.1
-        return _result("noul", None, {"yes": p, "no": 1 - p})
-
-    def ask_batch(self, state, questions):
-        self.batch_calls += 1
-        return {name: _result("noul", None, {"yes": self.batch.get(name, 0.1), "no": 0.9})
-                for name in questions}
+from tests.scripted_model import ScriptedModel
 
 
 def _plan(db, model, question, seeds, overrides=None, **kw):

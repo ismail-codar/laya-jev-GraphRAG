@@ -147,6 +147,10 @@ class Settings(BaseSettings):
         0.3, ge=0.0, le=1.0,
         description="Plan confidence (weakest step probability) required to execute a plan",
     )
+    aggregate_check_min_confidence: float = Field(
+        0.5, ge=0.0, le=1.0,
+        description="Noul P(yes) the back-translated plan must reach against the question",
+    )
     aggregate_max_hops: int = Field(3, ge=0, le=5, description="Maximum hops the planner may add")
     aggregate_row_limit: int = Field(200, gt=0, description="Row limit for list/group results")
     aggregate_answer_mode: str = Field(

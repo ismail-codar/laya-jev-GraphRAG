@@ -268,7 +268,8 @@ class GuidedQueryPlanner:
         except Exception as exc:  # noqa: BLE001 — planner must never break the pipeline
             logger.warning("Guided planner failed for %r: %s", question, exc)
             return None
-        asked = [t.probability for t in state.trace if not t.forced]
+        # Overridden steps are a deliberate repair; the plan check vouches for them.
+        asked = [t.probability for t in state.trace if not t.forced and not t.overridden]
         return PlannerResult(
             plan=state.plan,
             trace=state.trace,
