@@ -420,7 +420,7 @@ def main(argv: list[str] | None = None) -> int:
         validate_item(item)
 
     counter = CountingModel(get_decision_model())
-    with tempfile.TemporaryDirectory() as tmp, \
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp, \
          patch("graphrag.retrieval.router.get_decision_model", return_value=counter), \
          patch("graphrag.retrieval.planner.planner.get_decision_model", return_value=counter), \
          patch("graphrag.retrieval.planner.executor.get_decision_model", return_value=counter):

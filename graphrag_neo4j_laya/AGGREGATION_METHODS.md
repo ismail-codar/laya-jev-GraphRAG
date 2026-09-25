@@ -750,37 +750,39 @@ Yöntem 1–5'in yapamadığı çok adımlı yol filtreleri de bu yolla ifade ed
 
 ### Ölçüm (gerçek Laya)
 
-Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `examples/data/aggregate_eval.json`, 33 soru: 10 basit, 6 gruplu / filtreli, 4 iki hop'lu, 3 anlamsal filtreli agregasyon, ve 10 agregasyon olmayan soru; 13'ü Türkçe. Seed'ler setten gelir, yani seed seçim hataları sayılara karışmaz. Laya `multilingual` checkpoint, CPU, 2026-09-25.
+Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `examples/data/aggregate_eval.json`, 34 soru: 10 basit, 7 gruplu / filtreli, 4 iki hop'lu, 3 anlamsal filtreli agregasyon, ve 10 agregasyon olmayan soru; 14'ü Türkçe. Seed'ler setten gelir, yani seed seçim hataları sayılara karışmaz. Laya `multilingual` checkpoint, CPU, 2026-09-25.
 
-> Ölçümden sonra `collect` metriği plan diline ve metrik `Choice` listesine eklendi, sete de bunu
-> ölçen bir soru girdi (`g07`, gruplu `collect`); set artık 34 soru. Aşağıdaki metrik doğruluğu bu
-> seçeneği içermiyor, yeniden ölçülmedi.
+> Bu, `collect` metriği plan diline ve metrik `Choice` listesine girdikten sonraki ikinci ölçüm.
+> İlk ölçüm 33 soruyluydu; adım oranlarındaki farkların çoğu paydanın 23'ten 24'e çıkmasından
+> geliyor, tablo aynı tabloyu anlatıyor.
 
 | Ölçüm | Sonuç | Bayrak hedefi |
 | --- | --- | --- |
-| İşlem doğruluğu | %73,9 | |
-| Başlangıç doğruluğu | %39,1 | |
-| Hop tipi / yön / durma | %17,4 / %8,7 / %26,1 | yön ≥ %90 |
-| Filtre / anahtar / metrik / `HAVING` | %82,6 / %78,3 / %69,6 / %91,3 | |
-| Anlamsal filtre adımı | %82,6 (3 anlamsal sorunun 1'i doğru, 2 soruda gereksiz filtre) | |
-| Tam plan eşleşmesi | %0 (0 / 23) | |
-| Sonuç eşleşmesi | %8,7 (2 / 23, ikisi de yanlış planla tesadüfen) | ≥ %80 |
-| Agregasyon sorusunu `aggregate`'e yönlendirme | %39,1 | |
+| İşlem doğruluğu | %70,8 | |
+| Başlangıç doğruluğu | %41,7 (doğruların hepsi seed'i olmayan sorulardan) | |
+| Hop tipi / yön / durma | %16,7 / %8,3 / %25,0 | yön ≥ %90 |
+| Filtre / anahtar / metrik / `HAVING` | %83,3 / %75,0 / %66,7 / %91,7 | |
+| Anlamsal filtre adımı | %83,3 (3 anlamsal sorunun 1'i doğru, 2 soruda gereksiz filtre) | |
+| Tam plan eşleşmesi | %0 (0 / 24) | |
+| Sonuç eşleşmesi | %8,3 (2 / 24, ikisi de yanlış planla tesadüfen) | ≥ %80 |
+| Agregasyon sorusunu `aggregate`'e yönlendirme | %37,5 | |
 | Yanlış yönlendirme (agregasyon olmayan → `aggregate`) | %10 (1 / 10) | %0 |
-| Geri çeviri kontrolü: doğru planı geçirme / yanlış planı reddetme | %47,8 / %65,2 | |
+| Geri çeviri kontrolü: doğru planı geçirme / yanlış planı reddetme | %50,0 / %66,7 | |
 | Min ve çarpım güveninin ayırma gücü | ölçülemedi (hiç doğru plan yok) | |
-| Dil kırılımı (sonuç eşleşmesi) | en %7,1 · tr %11,1 | |
-| Gecikme (ortalama) | yönlendirme 0,9 sn · plan 3,8 sn | |
-| Soru başına çağrı | 4,0 `Choice` · 1,5 `Noul` · 0,1 `ask_batch` | |
+| Dil kırılımı (sonuç eşleşmesi) | en %7,1 · tr %10,0 | |
+| Gecikme (ortalama) | yönlendirme 0,14 sn · plan 0,88 sn | |
+| Soru başına çağrı | 4,1 `Choice` · 1,5 `Noul` · 0,1 `ask_batch` | |
 
 Üç bayrak hedefinin üçü de tutmadı. Router rotası kapalı kalır.
 
 ### Bulgular
 
-- **Asıl kırılma başlangıç adımında.** Seed'i olan 16 sorunun hiçbirinde Laya seed'i seçmedi. "How many places was Isaac Newton born in?" için P(bütün graph) = 0,995. İki farklı ifadeyle denendi (kısa `Choice`, "soru X'i adıyla anıyor mu?" `Noul`'u); seed hatırlama 8 soruda 0–2'de kaldı. Başlangıç yanlış olunca sonraki bütün hop'lar da yanlış oluyor.
+- **Asıl kırılma başlangıç adımında.** Seed'i olan 14 sorunun hiçbirinde Laya seed'i seçmedi; başlangıç doğruluğunun tamamı, başlangıcın zaten "bütün graph" olarak zorlandığı 10 sorudan geliyor. "How many places was Isaac Newton born in?" için P(bütün graph) = 0,995. İki farklı ifadeyle denendi (kısa `Choice`, "soru X'i adıyla anıyor mu?" `Noul`'u); seed hatırlama 8 soruda 0–2'de kaldı. Başlangıç yanlış olunca sonraki bütün hop'lar da yanlış oluyor.
 - **Hop seçimi yazı-tura düzeyinde.** Örnek: `BORN_IN:out` 0,36, `BORN_IN:in` 0,34. `stop` genellikle erken değil geç seçiliyor; bir soruda 3 hop'luk anlamsız bir yol kuruldu.
 - **Geri çeviri kontrolü zayıf bir ayırıcı.** Doğru planların yarısını reddediyor, yanlışların üçte birini geçiriyor. Onarım adımı bu yüzden az işe yarıyor.
 - **İşlem, filtre ve `HAVING` adımları görece iyi**, ama bu adımların çoğu soruda "yok" cevabı bekleniyor; yüksek oran kısmen bundan geliyor.
+- **`collect` seçeneğine sıra gelmedi.** Yeni `g07` sorusunda ("Her varlık hangi ilişki tiplerini kullanıyor?") Laya işlem adımında `group` yerine `list` seçti; `list` planlarında şekil adımı hiç çalışmadığı için metrik `Choice`'ı — dolayısıyla `collect` seçeneğini — görmedi. Ardından 3 hop'luk anlamsız bir yol kurdu (`RELATED_TO:in`, `RELATED_TO:out`, `EXTENDS:in`), plan güveni 0,17. Yani yeni metrik ölçülebilmiş değil: önündeki işlem adımı tıkalı.
+- **Gecikme ilk ölçümün dörtte biri çıktı** (plan 3,8 sn → 0,88 sn, yönlendirme 0,9 sn → 0,14 sn). Kod yolu aynı; fark ölçüm anındaki makine yüküne benziyor, ayrıca araştırılmadı.
 - **Mimari beklendiği gibi çalışıyor:** bütün geçersiz hamleler yapısal olarak engelleniyor, üretilen her plan geçerli Cypher'a dönüşüyor, boş ve kesilmiş sonuçlar doğru raporlanıyor (235 birim testi).
 
 ### Sonraki denemeler (ölçülmedi)

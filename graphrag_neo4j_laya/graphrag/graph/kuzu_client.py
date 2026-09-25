@@ -54,8 +54,14 @@ class KuzuClient(BaseGraphClient):
         self._embeddings: dict[str, np.ndarray] = {}
 
     def close(self) -> None:
-        # Kuzu handles cleanup on process exit, but we can clear refs
-        pass
+        # Kùzu holds the database files open until both handles are closed.
+        # Waiting for process exit is enough on POSIX but not on Windows,
+        # where an open file keeps its directory from being removed.
+        for handle in (self.conn, self.db):
+            if handle is not None:
+                handle.close()
+        self.conn = self.db = None
+        self._embeddings.clear()
 
     def create_schema(self) -> None:
         try:
