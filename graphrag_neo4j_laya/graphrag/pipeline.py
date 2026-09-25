@@ -7,7 +7,7 @@ Wires together ALL pipeline components in the correct order (functions.md):
 
     Phase 1 (offline): Ingestion → Chunking, NER, Disambiguation,
                         Edge Verification, Ontology Alignment
-    Phase 2: Intent routing → QueryIntent (local / multi_hop / global)
+    Phase 2: Intent routing → QueryIntent (local / multi_hop / global / aggregate)
     Phase 2: Seed selection → top-K entry nodes
     Phase 3: Graph traversal → relevant subgraph paths (+ Early Termination)
     Phase 4: Post-traversal:
@@ -34,9 +34,13 @@ import argparse
 import logging
 from typing import Any
 
+from config.settings import settings
 from graphrag.graph.base import BaseGraphClient
 from graphrag.graph.factory import get_graph_client
+from graphrag.graph.relation_schema import load_relation_schema
 from graphrag.models.llm import get_llm
+from graphrag.retrieval.planner.executor import AggregateExecutor, AggregateResult
+from graphrag.retrieval.planner.planner import GuidedQueryPlanner
 from graphrag.retrieval.router import IntentRouter, QueryIntent
 from graphrag.retrieval.seed_selector import SeedSelector
 from graphrag.retrieval.traversal.astar import LayaGraphNavigator
@@ -80,6 +84,8 @@ class GraphRAGPipeline:
         self._astar  = LayaGraphNavigator(self._db)
         self._bfs    = ScoreGatedBFS(self._db)
         self._llm    = llm or get_llm()
+        self._aggregate: AggregateExecutor | None = None
+        self._aggregate_warned = False
 
     # ── Path → node list conversion ───────────────────────────────────────────
 
@@ -130,7 +136,48 @@ class GraphRAGPipeline:
             return "No relevant information found."
         return "\n".join(f"- {n['name']}: {n.get('text', '')}" for n in nodes)
 
+    # ── Aggregate route (guided query planner) ───────────────────────────────
+
+    def _aggregate_executor(self) -> AggregateExecutor | None:
+        if settings.decision_model_backend == "ablation":
+            # AblationModel implements only score(); the planner needs choice/noul.
+            if not self._aggregate_warned:
+                logger.warning("Aggregate route unavailable with the ablation backend")
+                self._aggregate_warned = True
+            return None
+        if self._aggregate is None:
+            planner = GuidedQueryPlanner(self._db, load_relation_schema(settings.relation_schema_path))
+            self._aggregate = AggregateExecutor(self._db, planner)
+        return self._aggregate
+
+    def _aggregate_answer(self, user_query: str, result: AggregateResult) -> str:
+        if settings.aggregate_answer_mode != "llm":
+            return result.answer
+        prompt = (
+            f"User question: {user_query}\n\n"
+            f"Graph database result:\n{self._format_nodes(result.facts)}\n\n"
+            f"Based only on the above result, provide a concise and accurate answer. "
+            f"Do not add information that is not present in the result."
+        )
+        answer = self._llm.generate(prompt)
+        citation = verify_citations(answer, result.facts)
+        if not citation.is_faithful:
+            logger.warning("Aggregate citation FAILED (P=%.3f) — prefixing answer", citation.noul_score)
+            return _FLAGGED_PREFIX + answer
+        return answer
+
     # ── Public API ────────────────────────────────────────────────────────────
+
+    def query_aggregate(self, user_query: str) -> AggregateResult | None:
+        """
+        Run the guided query planner directly, bypassing the router and the
+        aggregate_route_enabled flag. Returns the full result (plan, Cypher,
+        rows, trace) or None when no plan was accepted.
+        """
+        executor = self._aggregate_executor()
+        if executor is None:
+            return None
+        return executor.run(user_query, self._seeds.select(user_query))
 
     def query(self, user_query: str, max_depth: int = 4) -> str:
         """
@@ -152,7 +199,8 @@ class GraphRAGPipeline:
         logger.info("GraphRAG query: %r", user_query)
 
         # ── Phase 2: Intent Routing (Choice) ──────────────────────────────────
-        intent = self._router.route(user_query)
+        decision = self._router.route_detailed(user_query)
+        intent = decision.intent
         logger.info("Phase 2 — Intent: %s", intent)
 
         # ── Phase 2: Seed Node Selection ──────────────────────────────────────
@@ -160,6 +208,21 @@ class GraphRAGPipeline:
         if not seed_names:
             return "I could not find relevant entry points in the knowledge graph."
         logger.info("Phase 2 — Seeds: %s", seed_names)
+
+        # ── Phase 3 (aggregate): guided query planner → DB ────────────────────
+        # Rerank and the hallucination gate are skipped: the DB result is
+        # complete by construction and pruning it would lose data.
+        if intent == QueryIntent.AGGREGATE:
+            executor = (
+                self._aggregate_executor()
+                if decision.confidence >= settings.aggregate_route_min_confidence else None
+            )
+            result = executor.run(user_query, seed_names) if executor else None
+            if result is not None:
+                logger.info("Phase 3 — Aggregate plan: %s", result.description)
+                return self._aggregate_answer(user_query, result)
+            logger.info("Phase 3 — Aggregate route declined → %s", decision.fallback)
+            intent = decision.fallback
 
         # ── Phase 3: Graph Traversal (+ Early Termination via Noul) ──────────
         raw_nodes: list[dict[str, Any]] = []
