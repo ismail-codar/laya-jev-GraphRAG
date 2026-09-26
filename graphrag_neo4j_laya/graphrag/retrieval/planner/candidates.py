@@ -129,6 +129,19 @@ def relation_object_words(description: str) -> frozenset[str]:
     return frozenset()
 
 
+# A question can name what it wants without naming a kind: "everything",
+# "all entities", "tüm varlıklar". Then a kind it also names belongs to
+# something else in the sentence — the entity in the middle of the path.
+_ANYTHING_RE = re.compile(
+    r"(?<!\w)(everything|anything|entit(y|ies)|things?|"
+    r"varlık\w*|şey\w*)(?!\w)", re.IGNORECASE)
+
+
+def asks_for_anything(text: str) -> bool:
+    """Does the question say its answer is any entity, of whatever kind?"""
+    return bool(_ANYTHING_RE.search(text))
+
+
 def kinds_named(text: str, predicate_words: dict[str, tuple[str, ...]]) -> list[str]:
     """Every predicate kind *text* names."""
     said = {w.lower() for w in re.findall(r"[^\W\d_]+", text, re.UNICODE)}

@@ -12,18 +12,18 @@
       "keys": 1.0,
       "metrics": 1.0,
       "having": 1.0,
-      "semantic": 0.9583333333333334
+      "semantic": 1.0
     },
-    "exact_plan_match": 0.9166666666666666,
-    "result_match": 0.9583333333333334,
+    "exact_plan_match": 0.9583333333333334,
+    "result_match": 1.0,
     "aggregate_route_recall": 0.375,
     "misrouting_rate": 0.1,
     "route_accuracy": 0.4117647058823529,
     "by_lang": {
       "en": {
         "questions": 20,
-        "exact_plan_match": 0.8571428571428571,
-        "result_match": 0.9285714285714286,
+        "exact_plan_match": 0.9285714285714286,
+        "result_match": 1.0,
         "route_accuracy": 0.45
       },
       "tr": {
@@ -39,15 +39,15 @@
       "wrong_reject_rate": 0.6666666666666666
     },
     "confidence_separation": {
-      "min": 0.8409090909090909,
-      "product": 0.8409090909090909
+      "min": 0.8695652173913043,
+      "product": 0.8695652173913043
     },
     "latency_ms": {
-      "route_mean": 227.75773234966704,
-      "plan_mean": 572.1736541842498
+      "route_mean": 299.9127382371465,
+      "plan_mean": 825.978033336772
     },
     "calls_mean": {
-      "choice_detailed": 2.5588235294117645,
+      "choice_detailed": 2.5294117647058822,
       "noul_detailed": 1.411764705882353,
       "ask_batch": 0.0
     },
@@ -68,8 +68,8 @@
       "route_confidence": 0.4193,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 410.7405000831932,
-      "plan_ms": 730.3719000192359,
+      "route_ms": 326.8355999607593,
+      "plan_ms": 1449.1989000234753,
       "plan_description": "Start at the entity 'Isaac Newton', then step to entities it has any relation to, then count the distinct entities reached (the step-1 entity).",
       "gold_description": "Start at the entity 'Isaac Newton', then step to entities it has any relation to, then count the distinct entities reached (the step-1 entity).",
       "gold_hops": [
@@ -134,8 +134,8 @@
       "route_confidence": 0.9844,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 210.55060008075088,
-      "plan_ms": 411.67020006105304,
+      "route_ms": 373.5166999977082,
+      "plan_ms": 715.4108000686392,
       "plan_description": "Start at the entity 'Isaac Newton', then step to entities it has a BORN_IN relation (was born in a place) to, then count the distinct entities reached (the step-1 entity).",
       "gold_description": "Start at the entity 'Isaac Newton', then step to entities it has a BORN_IN relation (was born in a place) to, then count the distinct entities reached (the step-1 entity).",
       "gold_hops": [
@@ -200,8 +200,8 @@
       "route_confidence": 0.4919,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 197.02459999825805,
-      "plan_ms": 365.87239999789745,
+      "route_ms": 308.22969996370375,
+      "plan_ms": 555.4610999533907,
       "plan_description": "Start at the entity 'Isaac Newton', then step to entities it has a AUTHORED relation (wrote, published or authored a work) to, then count the distinct entities reached (the step-1 entity).",
       "gold_description": "Start at the entity 'Isaac Newton', then step to entities it has a AUTHORED relation (wrote, published or authored a work) to, then count the distinct entities reached (the step-1 entity).",
       "gold_hops": [
@@ -266,8 +266,8 @@
       "route_confidence": 0.4296,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 224.50949996709824,
-      "plan_ms": 169.2267000908032,
+      "route_ms": 309.3429999426007,
+      "plan_ms": 265.72140003554523,
       "plan_description": "Start from every entity, then count the distinct entities reached (the start entity).",
       "gold_description": "Start from every entity, then count the distinct entities reached (the start entity).",
       "gold_hops": [],
@@ -328,8 +328,8 @@
       "route_confidence": 0.6383,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 229.87889999058098,
-      "plan_ms": 697.7820999454707,
+      "route_ms": 557.6854000100866,
+      "plan_ms": 1040.372300078161,
       "plan_description": "Start from every entity, then step to entities it has a DISCOVERED relation (discovered, detected or first observed something) to, then count the distinct entities reached (the step-1 entity).",
       "gold_description": "Start from every entity, then step to entities it has a DISCOVERED relation (discovered, detected or first observed something) to, then count the distinct entities reached (the step-1 entity).",
       "gold_hops": [
@@ -394,8 +394,8 @@
       "route_confidence": 0.3889,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 285.35000002011657,
-      "plan_ms": 618.1530000176281,
+      "route_ms": 318.13390005845577,
+      "plan_ms": 641.1487000295892,
       "plan_description": "Start at the entity 'Isaac Newton', then step to entities it has a AUTHORED relation (wrote, published or authored a work) to, then list the distinct entities reached (the step-1 entity).",
       "gold_description": "Start at the entity 'Isaac Newton', then step to entities it has a AUTHORED relation (wrote, published or authored a work) to, then list the distinct entities reached (the step-1 entity).",
       "gold_hops": [
@@ -460,8 +460,8 @@
       "route_confidence": 0.6644,
       "route_correct": true,
       "misrouted": false,
-      "route_ms": 211.19230007752776,
-      "plan_ms": 221.1098000407219,
+      "route_ms": 297.7172000100836,
+      "plan_ms": 289.08230003435165,
       "plan_description": "Start at the entity 'Gravitational Waves', then step to entities that have a DISCOVERED relation (discovered, detected or first observed something) to it, then list the distinct entities reached (the step-1 entity).",
       "gold_description": "Start at the entity 'Gravitational Waves', then step to entities that have a DISCOVERED relation (discovered, detected or first observed something) to it, then list the distinct entities reached (the step-1 entity).",
       "gold_hops": [
@@ -526,8 +526,8 @@
       "route_confidence": 0.6501,
       "route_correct": true,
       "misrouted": false,
-      "route_ms": 223.4302000142634,
-      "plan_ms": 767.1303000533953,
+      "route_ms": 298.6613000975922,
+      "plan_ms": 1661.2245000433177,
       "plan_description": "Start at the entity 'General Relativity', then step to entities it has any relation to, then list the distinct entities reached (the step-1 entity).",
       "gold_description": "Start at the entity 'General Relativity', then step to entities it has any relation to, then list the distinct entities reached (the step-1 entity).",
       "gold_hops": [
@@ -604,8 +604,8 @@
       "route_confidence": 0.6953,
       "route_correct": true,
       "misrouted": false,
-      "route_ms": 206.49360003881156,
-      "plan_ms": 683.1910000182688,
+      "route_ms": 282.24029997363687,
+      "plan_ms": 972.9750999249518,
       "plan_description": "Start at the entity 'Gravitational Waves', then step to entities that have any relation to it, then count the distinct entities reached (the step-1 entity).",
       "gold_description": "Start at the entity 'Gravitational Waves', then step to entities that have any relation to it, then count the distinct entities reached (the step-1 entity).",
       "gold_hops": [
@@ -670,8 +670,8 @@
       "route_confidence": 0.9258,
       "route_correct": true,
       "misrouted": false,
-      "route_ms": 200.56409994140267,
-      "plan_ms": 613.2555999793112,
+      "route_ms": 270.138599909842,
+      "plan_ms": 1012.90670002345,
       "plan_description": "Start at the entity 'Calculus', then step to entities that have any relation to it, then count the distinct entities reached (the step-1 entity).",
       "gold_description": "Start at the entity 'Calculus', then step to entities that have any relation to it, then count the distinct entities reached (the step-1 entity).",
       "gold_hops": [
@@ -736,8 +736,8 @@
       "route_confidence": 0.4466,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 235.08110002148896,
-      "plan_ms": 582.8153999755159,
+      "route_ms": 272.27610000409186,
+      "plan_ms": 986.4010000601411,
       "plan_description": "Start at the entity 'Isaac Newton', then step to entities it has any relation to, then group by relation type of the step-1 relation and compute number of matches.",
       "gold_description": "Start at the entity 'Isaac Newton', then step to entities it has any relation to, then group by relation type of the step-1 relation and compute number of matches.",
       "gold_hops": [
@@ -828,8 +828,8 @@
       "route_confidence": 0.426,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 166.27669997978956,
-      "plan_ms": 591.8615000555292,
+      "route_ms": 243.81429993081838,
+      "plan_ms": 1043.746400042437,
       "plan_description": "Start from every entity, then step to entities that have any relation to it, then group by relation type of the step-1 relation and compute number of matches.",
       "gold_description": "Start from every entity, then step to entities it has any relation to, then group by relation type of the step-1 relation and compute number of matches.",
       "gold_hops": [
@@ -968,8 +968,8 @@
       "route_confidence": 0.4864,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 174.37150003388524,
-      "plan_ms": 859.103100025095,
+      "route_ms": 230.23149999789894,
+      "plan_ms": 1218.1355999782681,
       "plan_description": "Start from every entity, then step to entities it has any relation to, then group by name of the start entity and rank by number of matches.",
       "gold_description": "Start from every entity, then step to entities it has any relation to, then group by name of the start entity and rank by number of matches.",
       "gold_hops": [
@@ -1052,8 +1052,8 @@
       "route_confidence": 0.8096,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 214.74040008615702,
-      "plan_ms": 816.6838999604806,
+      "route_ms": 231.20560008101165,
+      "plan_ms": 1191.2466998910531,
       "plan_description": "Start from every entity, then step to entities it has any relation to, then group by name of the start entity and compute number of matches, keeping groups whose number of matches is at least 2.",
       "gold_description": "Start from every entity, then step to entities it has any relation to, then group by name of the start entity and compute number of matches, keeping groups whose number of matches is at least 2.",
       "gold_hops": [
@@ -1144,8 +1144,8 @@
       "route_confidence": 0.6538,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 205.75119997374713,
-      "plan_ms": 654.7760999528691,
+      "route_ms": 238.95380005706102,
+      "plan_ms": 586.6495999507606,
       "plan_description": "Start at the entity 'Isaac Newton', then step to entities it has any relation to, then group by relation type of the step-1 relation and compute number of distinct name of the step-1 entity.",
       "gold_description": "Start at the entity 'Isaac Newton', then step to entities it has any relation to, then group by relation type of the step-1 relation and compute number of distinct name of the step-1 entity.",
       "gold_hops": [
@@ -1236,8 +1236,8 @@
       "route_confidence": 0.5452,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 219.53579992987216,
-      "plan_ms": 727.9136999277398,
+      "route_ms": 234.71470002550632,
+      "plan_ms": 1126.6399000305682,
       "plan_description": "Start from every entity, then step to entities it has any relation to, then group by relation type of the step-1 relation and compute number of matches, keeping groups whose number of matches is greater than 1.",
       "gold_description": "Start from every entity, then step to entities it has any relation to, then group by relation type of the step-1 relation and compute number of matches, keeping groups whose number of matches is greater than 1.",
       "gold_hops": [
@@ -1320,8 +1320,8 @@
       "route_confidence": 0.4232,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 198.47699999809265,
-      "plan_ms": 708.221200038679,
+      "route_ms": 259.3117000069469,
+      "plan_ms": 1086.0880999825895,
       "plan_description": "Start from every entity, then step to entities it has any relation to, then group by name of the start entity and compute list of every relation type of the step-1 relation.",
       "gold_description": "Start from every entity, then step to entities it has any relation to, then group by name of the start entity and compute list of every relation type of the step-1 relation.",
       "gold_hops": [
@@ -1472,8 +1472,8 @@
       "route_confidence": 0.4738,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 247.03229998704046,
-      "plan_ms": 686.1499000806361,
+      "route_ms": 434.54809999093413,
+      "plan_ms": 959.3102000653744,
       "plan_description": "Start at the entity 'Albert Einstein', then step to entities it has any relation to, then step to entities it has any relation to, then keep only matches where the name of the step-2 entity is not equal to 'Albert Einstein', then count the distinct entities reached (the step-2 entity).",
       "gold_description": "Start at the entity 'Albert Einstein', then step to entities it has any relation to, then step to entities it has any relation to, then keep only matches where the name of the step-2 entity is not equal to 'Albert Einstein', then count the distinct entities reached (the step-2 entity).",
       "gold_hops": [
@@ -1552,9 +1552,9 @@
       "route_confidence": 0.6385,
       "route_correct": true,
       "misrouted": false,
-      "route_ms": 220.1649999478832,
-      "plan_ms": 1179.4048000592738,
-      "plan_description": "Start at the entity 'Albert Einstein', then step to entities it has a DISCOVERED relation (discovered, detected or first observed something) to, then step to entities it has any relation to, then keep only matches where the name of the step-2 entity is not equal to 'Albert Einstein', then list the distinct entities reached (the step-2 entity). (keep only entities that are a scientific theory, law or mathematical idea)",
+      "route_ms": 300.3083999501541,
+      "plan_ms": 923.4440999571234,
+      "plan_description": "Start at the entity 'Albert Einstein', then step to entities it has a DISCOVERED relation (discovered, detected or first observed something) to, then step to entities it has any relation to, then keep only matches where the name of the step-2 entity is not equal to 'Albert Einstein', then list the distinct entities reached (the step-2 entity).",
       "gold_description": "Start at the entity 'Albert Einstein', then step to entities it has a DISCOVERED relation (discovered, detected or first observed something) to, then step to entities it has any relation to, then keep only matches where the name of the step-2 entity is not equal to 'Albert Einstein', then list the distinct entities reached (the step-2 entity).",
       "gold_hops": [
         "DISCOVERED:out",
@@ -1584,15 +1584,10 @@
           "v2.name",
           "!=",
           "Albert Einstein"
-        ],
-        [
-          "v2.name",
-          "in",
-          []
         ]
       ],
       "gold_semantic": null,
-      "plan_semantic": "theory",
+      "plan_semantic": null,
       "steps": {
         "operation": true,
         "start": true,
@@ -1603,11 +1598,21 @@
         "keys": true,
         "metrics": true,
         "having": true,
-        "semantic": false
+        "semantic": true
       },
-      "exact_plan_match": false,
-      "result_match": false,
-      "actual_rows": [],
+      "exact_plan_match": true,
+      "result_match": true,
+      "actual_rows": [
+        [
+          "Gravitational Waves"
+        ],
+        [
+          "Spacetime Curvature"
+        ],
+        [
+          "Universal Gravitation"
+        ]
+      ],
       "expected_rows": [
         [
           "Gravitational Waves"
@@ -1620,11 +1625,11 @@
         ]
       ],
       "confidence_min": 0.5327,
-      "confidence_product": 0.29715794723232447,
+      "confidence_product": 0.385668977589,
       "check_gold": 0.8135,
       "check_wrong": 0.7324,
       "calls": {
-        "choice_detailed": 5,
+        "choice_detailed": 4,
         "noul_detailed": 2,
         "ask_batch": 0
       }
@@ -1639,8 +1644,8 @@
       "route_confidence": 0.3533,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 206.1225000070408,
-      "plan_ms": 468.84810004848987,
+      "route_ms": 245.6370999570936,
+      "plan_ms": 562.1456999797374,
       "plan_description": "Start at the entity 'Isaac Newton', then step to entities it has a AUTHORED relation (wrote, published or authored a work) to, then step to entities it has a RELATED_TO relation (any other relationship) to, then keep only matches where the name of the step-2 entity is not equal to 'Isaac Newton', then list the distinct entities reached (the step-2 entity).",
       "gold_description": "Start at the entity 'Isaac Newton', then step to entities it has a AUTHORED relation (wrote, published or authored a work) to, then step to entities it has a RELATED_TO relation (any other relationship) to, then keep only matches where the name of the step-2 entity is not equal to 'Isaac Newton', then list the distinct entities reached (the step-2 entity).",
       "gold_hops": [
@@ -1719,8 +1724,8 @@
       "route_confidence": 0.5904,
       "route_correct": true,
       "misrouted": false,
-      "route_ms": 207.09869998972863,
-      "plan_ms": 619.6303000906482,
+      "route_ms": 230.23089999333024,
+      "plan_ms": 898.8760999636725,
       "plan_description": "Start at the entity 'Isaac Newton', then step to entities it has any relation to, then step to entities that have a DEVELOPED relation (formulated, invented or developed an idea, theory or technology) to it, then keep only matches where the name of the step-2 entity is not equal to 'Isaac Newton', then count the distinct entities reached (the step-2 entity).",
       "gold_description": "Start at the entity 'Isaac Newton', then step to entities it has any relation to, then step to entities that have a DEVELOPED relation (formulated, invented or developed an idea, theory or technology) to it, then keep only matches where the name of the step-2 entity is not equal to 'Isaac Newton', then count the distinct entities reached (the step-2 entity).",
       "gold_hops": [
@@ -1799,8 +1804,8 @@
       "route_confidence": 0.8057,
       "route_correct": true,
       "misrouted": false,
-      "route_ms": 223.49570004735142,
-      "plan_ms": 183.9562999084592,
+      "route_ms": 219.12679995875806,
+      "plan_ms": 232.54180001094937,
       "plan_description": "Start from every entity, then count the distinct entities reached (the start entity). (keep only entities that are a scientific theory, law or mathematical idea)",
       "gold_description": "Start from every entity, then count the distinct entities reached (the start entity). (keep only entities that are a scientific theory, law or mathematical idea)",
       "gold_hops": [],
@@ -1870,8 +1875,8 @@
       "route_confidence": 0.6238,
       "route_correct": true,
       "misrouted": false,
-      "route_ms": 212.3149000108242,
-      "plan_ms": 180.2286000456661,
+      "route_ms": 215.15429997816682,
+      "plan_ms": 180.19800004549325,
       "plan_description": "Start from every entity, then count the distinct entities reached (the start entity). (keep only entities that are a person)",
       "gold_description": "Start from every entity, then count the distinct entities reached (the start entity). (keep only entities that are a person)",
       "gold_hops": [],
@@ -1942,8 +1947,8 @@
       "route_confidence": 0.7344,
       "route_correct": true,
       "misrouted": false,
-      "route_ms": 202.5584999937564,
-      "plan_ms": 194.8118000291288,
+      "route_ms": 228.92910009250045,
+      "plan_ms": 224.54779990948737,
       "plan_description": "Start from every entity, then list the distinct entities reached (the start entity). (keep only entities that are a place such as a city, village or country)",
       "gold_description": "Start from every entity, then list the distinct entities reached (the start entity). (keep only entities that are a place such as a city, village or country)",
       "gold_hops": [],
@@ -2019,7 +2024,7 @@
       "route_confidence": 0.9565,
       "route_correct": true,
       "misrouted": false,
-      "route_ms": 201.39159995596856,
+      "route_ms": 240.04529998637736,
       "calls": {
         "choice_detailed": 1,
         "noul_detailed": 0,
@@ -2036,7 +2041,7 @@
       "route_confidence": 0.7138,
       "route_correct": true,
       "misrouted": false,
-      "route_ms": 268.1657000211999,
+      "route_ms": 256.3091000774875,
       "calls": {
         "choice_detailed": 1,
         "noul_detailed": 0,
@@ -2053,7 +2058,7 @@
       "route_confidence": 0.6359,
       "route_correct": true,
       "misrouted": false,
-      "route_ms": 365.3061999939382,
+      "route_ms": 272.73750002495944,
       "calls": {
         "choice_detailed": 1,
         "noul_detailed": 0,
@@ -2070,7 +2075,7 @@
       "route_confidence": 0.3675,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 322.9847999755293,
+      "route_ms": 341.8312999419868,
       "calls": {
         "choice_detailed": 1,
         "noul_detailed": 0,
@@ -2087,7 +2092,7 @@
       "route_confidence": 0.4429,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 215.23450000677258,
+      "route_ms": 268.0659999605268,
       "calls": {
         "choice_detailed": 1,
         "noul_detailed": 0,
@@ -2104,7 +2109,7 @@
       "route_confidence": 0.6137,
       "route_correct": false,
       "misrouted": true,
-      "route_ms": 198.2701999368146,
+      "route_ms": 321.44609990064055,
       "calls": {
         "choice_detailed": 1,
         "noul_detailed": 0,
@@ -2121,7 +2126,7 @@
       "route_confidence": 0.9965,
       "route_correct": true,
       "misrouted": false,
-      "route_ms": 205.2784999832511,
+      "route_ms": 273.22920004371554,
       "calls": {
         "choice_detailed": 1,
         "noul_detailed": 0,
@@ -2138,7 +2143,7 @@
       "route_confidence": 0.3946,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 196.6323999222368,
+      "route_ms": 330.94510005321354,
       "calls": {
         "choice_detailed": 1,
         "noul_detailed": 0,
@@ -2155,7 +2160,7 @@
       "route_confidence": 0.4327,
       "route_correct": true,
       "misrouted": false,
-      "route_ms": 224.13659992162138,
+      "route_ms": 408.7360000703484,
       "calls": {
         "choice_detailed": 1,
         "noul_detailed": 0,
@@ -2172,7 +2177,7 @@
       "route_confidence": 0.8656,
       "route_correct": false,
       "misrouted": false,
-      "route_ms": 213.60679995268583,
+      "route_ms": 556.7434000549838,
       "calls": {
         "choice_detailed": 1,
         "noul_detailed": 0,

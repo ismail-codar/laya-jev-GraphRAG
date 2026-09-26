@@ -335,6 +335,12 @@ class _Planning:
                    for hop in self.plan.hops}
         named = [kind for kind in candidates.kinds_named(self.question, words)
                  if kind not in implied]
+        if candidates.asks_for_anything(self.question):
+            # The question has already said what it wants — "List
+            # **everything** that the theory Einstein discovered is connected
+            # to" — so the kind it also names belongs to the entity in the
+            # middle of the path, not to the answer.
+            named = []
         if not named:
             self.forced("semantic", semantic_filter.NO_PREDICATE)
             return
