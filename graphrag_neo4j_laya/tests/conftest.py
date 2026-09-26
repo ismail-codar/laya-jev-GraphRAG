@@ -52,3 +52,23 @@ def science_graph(tmp_path_factory, science_data):
     db.run_community_detection()
     yield db
     db.close()
+
+
+# ── live tests (real Laya model) ─────────────────────────────────────────────
+
+def pytest_addoption(parser):
+    parser.addoption("--live", action="store_true",
+                     help="also run tests marked `live`, which call the real Laya decision model")
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "live: calls the real Laya decision model (opt in with --live)")
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--live"):
+        return
+    skip = pytest.mark.skip(reason="live test: needs --live (runs the real Laya model)")
+    for item in items:
+        if "live" in item.keywords:
+            item.add_marker(skip)

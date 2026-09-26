@@ -25,3 +25,6 @@ github.md
 idea.md
 functions.md
 .md
+
+# pytest Markdown reports (run_tests_report.cmd)
+graphrag_neo4j_laya/test-reports/

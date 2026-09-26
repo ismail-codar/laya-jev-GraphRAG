@@ -279,12 +279,16 @@ def _evaluate_plan(db, item, planner, check, schema) -> dict[str, Any]:
         # Labelled members stand in for the per-candidate Noul answers.
         actual = with_members(actual, item["members"] if actual_semantic == gold_semantic else [])
     asked = [t.probability for t in (result.trace if result else []) if not t.forced and not t.overridden]
+    rows = result_rows(db, actual) if actual is not None else None
     return {
         "plan_ms": plan_ms,
         "plan_description": result.description if result else None,
+        "gold_description": describe_spec(item["plan"], schema),
         "steps": steps,
         "exact_plan_match": is_exact(steps, gold, actual),
-        "result_match": actual is not None and result_rows(db, actual) == expected_rows(item),
+        "result_match": rows is not None and rows == expected_rows(item),
+        "actual_rows": rows,
+        "expected_rows": expected_rows(item),
         "confidence_min": result.confidence if result else None,
         "confidence_product": math.prod(asked) if result else None,
         "check_gold": check(question, describe_spec(item["plan"], schema)),
@@ -395,15 +399,8 @@ def format_report(summary: dict[str, Any]) -> str:
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
-                        format="%(levelname)s %(name)s: %(message)s")
-
+def run_live(data_path: Path = DEFAULT_DATA) -> tuple[list[dict[str, Any]], float]:
+    """Run the real router and planner (Laya) over the question set; return the records and check threshold."""
     from config.settings import settings
     from graphrag.graph.kuzu_client import KuzuClient
     from graphrag.models.decision_factory import get_decision_model
@@ -415,18 +412,15 @@ def main(argv: list[str] | None = None) -> int:
     settings.decision_model_backend = "laya"
     settings.aggregate_route_enabled = True
 
-    data = load_eval_set(args.data)
+    data = load_eval_set(data_path)
     for item in data["items"]:
         validate_item(item)
 
     counter = CountingModel(get_decision_model())
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp, \
-         patch("graphrag.retrieval.router.get_decision_model", return_value=counter), \
-         patch("graphrag.retrieval.planner.planner.get_decision_model", return_value=counter), \
-         patch("graphrag.retrieval.planner.executor.get_decision_model", return_value=counter):
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp,          patch("graphrag.retrieval.router.get_decision_model", return_value=counter),          patch("graphrag.retrieval.planner.planner.get_decision_model", return_value=counter),          patch("graphrag.retrieval.planner.executor.get_decision_model", return_value=counter):
         db = KuzuClient(db_path=str(Path(tmp) / "eval.kuzu"))
         try:
-            schema = build_graph(db, data, args.data)
+            schema = build_graph(db, data, data_path)
             planner = GuidedQueryPlanner(db, schema)
             records = evaluate(
                 db, data["items"],
@@ -439,8 +433,20 @@ def main(argv: list[str] | None = None) -> int:
             )
         finally:
             db.close()
+    return records, settings.aggregate_check_min_confidence
 
-    summary = summarise(records, settings.aggregate_check_min_confidence)
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("-v", "--verbose", action="store_true")
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
+                        format="%(levelname)s %(name)s: %(message)s")
+
+    records, check_threshold = run_live(args.data)
+    summary = summarise(records, check_threshold)
     print(format_report(summary))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps({"summary": summary, "records": records}, indent=2, ensure_ascii=False),

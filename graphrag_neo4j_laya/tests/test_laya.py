@@ -13,7 +13,9 @@ def _make_laya(answer: dict) -> "LayaModel":  # noqa: F821
     """Build a LayaModel whose `laya` agent returns *answer* for question 'q'."""
     from graphrag.models.laya import LayaModel
 
-    laya = LayaModel.__new__(LayaModel)
+    # object.__new__, not LayaModel.__new__: the latter returns the process-wide
+    # singleton, and the mock agent would leak into every later get_laya() caller.
+    laya = object.__new__(LayaModel)
     laya._initialised = True
     laya.agent = MagicMock()
     laya.agent.predict.return_value = {"answers": {"q": answer}}
