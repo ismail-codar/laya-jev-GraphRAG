@@ -27,7 +27,7 @@ def _plan(db, model, question, seeds, overrides=None, **kw):
 
 class TestAcceptancePlans:
     def test_ae1_count_incoming_developed(self, science_graph):
-        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"])
+        model = ScriptedModel(choices=["count", "DEVELOPED:in"])
         result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus", "Isaac Newton"])
         assert result.plan.operation == "count"
         assert result.plan.start == "Calculus"
@@ -162,7 +162,7 @@ class TestStartStep:
     """
 
     def test_a_named_seed_becomes_the_anchor(self, science_graph):
-        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"])
+        model = ScriptedModel(choices=["count", "DEVELOPED:in"])
         result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus"])
         assert result.plan.start == "Calculus"
         assert not any("anchor" in options for options in model.choice_calls)
@@ -190,7 +190,7 @@ class TestStartStep:
         assert result.plan.start is None
 
     def test_the_step_is_forced_so_it_cannot_lower_confidence(self, science_graph):
-        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"], prob=0.8)
+        model = ScriptedModel(choices=["count", "DEVELOPED:in"], prob=0.8)
         result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus"])
         start = next(t for t in result.trace if t.step == "start")
         assert start.forced and start.selected == "anchor"
@@ -200,12 +200,18 @@ class TestStartStep:
 class TestHopLoop:
     def test_an_anchored_plan_is_not_offered_stop_at_hop0(self, science_graph):
         # Stopping before the first hop would return the anchor itself.
-        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"])
+        model = ScriptedModel(choices=["count", "DEVELOPED:in"])
         result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus"])
         assert result.plan.start == "Calculus"
         assert "stop" not in model.choice_calls[1]
-        assert "stop" in model.choice_calls[2]          # still offered from hop1 on
         assert result.plan.hops == [Hop("DEVELOPED", "in")]
+
+    def test_stop_is_offered_again_from_hop1_on(self, science_graph):
+        model = ScriptedModel(choices=["list", "any:out", "stop"])
+        result = _plan(science_graph, model, "Albert Einstein neyle ilişkili?", ["Albert Einstein"])
+        assert "stop" not in model.choice_calls[1]
+        assert "stop" in model.choice_calls[2]
+        assert result.plan.hops == [Hop(None, "out")]
 
     def test_a_question_about_no_relation_stops_at_hop0(self, science_graph):
         # A zero-hop plan over the whole graph is a real answer ("how many
@@ -232,7 +238,7 @@ class TestHopLoop:
         assert not any(k.startswith("any:") for k in model.choice_calls[1])
 
     def test_a_named_relation_leaves_the_direction_to_the_model(self, science_graph):
-        model = ScriptedModel(choices=["list", "DEVELOPED:in", "stop"])
+        model = ScriptedModel(choices=["list", "DEVELOPED:in"])
         result = _plan(science_graph, model, "Who developed something?", [])
         assert result.plan.hops == [Hop("DEVELOPED", "in")]
         assert set(model.choice_calls[1]) == {"DEVELOPED:out", "DEVELOPED:in"}
@@ -263,7 +269,7 @@ class TestHopLoop:
         assert candidates.names_one_relation("Newton ne yazar?", schema, words) is None
 
     def test_a_schema_word_reaches_hop0(self, science_graph):
-        model = ScriptedModel(choices=["list", "DEVELOPED:in", "stop"])
+        model = ScriptedModel(choices=["list", "DEVELOPED:in"])
         result = _plan(science_graph, model, "Calculus'u kim geliştirdi?", [],
                        relation_words={"DEVELOPED": ("geliştir",)})
         assert result.plan.hops == [Hop("DEVELOPED", "in")]
@@ -326,6 +332,29 @@ class TestHopLoop:
         assert asked("How many entities are exactly two steps away?") == (2, True)
         assert asked("Newton'dan 3 adım uzaktaki varlıklar?") == (3, True)
 
+    def test_the_way_back_is_not_offered(self, science_graph):
+        # BORN_IN:out then BORN_IN:in returns to the entities the plan came
+        # from, which answers nothing it does not already hold.
+        model = ScriptedModel(choices=["list", "AUTHORED:out", "stop"])
+        result = _plan(science_graph, model, "Isaac Newton ne yazdı?", ["Isaac Newton"])
+        assert result.plan.hops == [Hop("AUTHORED", "out")]
+        assert "AUTHORED:in" not in model.choice_calls[2]
+        assert "RELATED_TO:out" in model.choice_calls[2]
+
+    def test_the_way_back_is_offered_when_the_question_asks_for_the_others(self, science_graph):
+        model = ScriptedModel(choices=["list", "BORN_IN:out", "BORN_IN:in", "stop"], nouls=[0.9])
+        result = _plan(science_graph, model, "Einstein'ın doğduğu yerde doğan başka kim var?",
+                       ["Albert Einstein"])
+        assert result.plan.hops == [Hop("BORN_IN", "out"), Hop("BORN_IN", "in")]
+
+    def test_the_way_back_is_kept_when_it_is_the_only_move(self, science_graph):
+        # Calculus' only neighbour leads straight back, so the plan stops
+        # rather than being left without a move.
+        model = ScriptedModel(choices=["count", "DEVELOPED:in"])
+        result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus"])
+        assert result.plan.hops == [Hop("DEVELOPED", "in")]
+        assert next(t for t in result.trace if t.step == "hop1").forced
+
     def test_empty_frontier_forces_stop_without_asking(self, science_graph):
         model = ScriptedModel(choices=["list"])
         result = _plan(science_graph, model, "Banana Bread neyle ilişkili?", ["Banana Bread"])
@@ -354,7 +383,7 @@ class TestFiltersAndShape:
         assert result.plan.filters == [Filter(FieldRef("v1", "pagerank"), ">", 0.1)]
 
     def test_no_numbers_skips_numeric_filter(self, science_graph):
-        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"])
+        model = ScriptedModel(choices=["count", "DEVELOPED:in"])
         result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus"])
         assert result.plan.filters == []
         assert not any(t.step.startswith("filter") for t in result.trace)
@@ -412,7 +441,7 @@ class TestCollectMetric:
 
 class TestTraceAndFailures:
     def test_trace_and_confidence(self, science_graph):
-        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"], prob=0.8)
+        model = ScriptedModel(choices=["count", "DEVELOPED:in"], prob=0.8)
         result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus"])
         steps = [t.step for t in result.trace]
         assert steps[:3] == ["operation", "start", "hop0"]

@@ -188,6 +188,23 @@ def hops_asked_for(
     return (2, False) if references >= 2 else (1, False)
 
 
+# "who else was born there", "başka kim": the question asks for the entities
+# beside the ones it came from, which is the one reading that wants a hop
+# back along the relation just taken.
+_THE_OTHERS_RE = re.compile(r"(?<!\w)(other|others|another|else|başka|diğer|öteki)(?!\w)",
+                            re.IGNORECASE)
+
+
+def asks_for_the_others(text: str) -> bool:
+    """Does the question ask for the entities beside the ones it started from?"""
+    return bool(_THE_OTHERS_RE.search(text))
+
+
+def the_way_back(hop: Hop) -> str:
+    """The option key that reverses *hop*, walking back where it came from."""
+    return f"{hop.rel_type or 'any'}:{'in' if hop.direction == 'out' else 'out'}"
+
+
 def only_this_relation(options: dict[str, str], rel_type: str) -> dict[str, str]:
     """The hop options of *rel_type* alone, or all of them if it has none here."""
     kept = {key: text for key, text in options.items() if key.split(":")[0] == rel_type}

@@ -218,6 +218,16 @@ class _Planning:
                 # It said how many steps, and the plan has taken them.
                 self.forced(step, "stop")
                 return
+            if i and not candidates.asks_for_the_others(self.question):
+                # Reversing the hop just taken walks back to the entities the
+                # plan came from, so it answers nothing the plan does not
+                # already hold — unless that is the question ("who else was
+                # born where Einstein was born"), which says so in words.
+                # Kept when it is all that is left, so that the plan stops
+                # rather than losing its only move.
+                back = candidates.the_way_back(self.plan.hops[-1])
+                if back in options and len(options) > 1:
+                    options.pop(back)
             # One option is not a choice, and asking would let a meaningless
             # probability into the plan's confidence.
             selected = (self.forced(step, next(iter(options))) if len(options) == 1

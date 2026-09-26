@@ -33,7 +33,7 @@ def _run(db, model, question, seeds, **kw):
 
 class TestCheckAndRepair:
     def test_passing_check_executes_once(self, science_graph):
-        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"], nouls=[0.9])
+        model = ScriptedModel(choices=["count", "DEVELOPED:in"], nouls=[0.9])
         result = _run(science_graph, model, AE1, ["Calculus"])
         assert result.rows == [{"count_distinct_v1_name": 1}]
         assert result.repaired is False
@@ -41,9 +41,11 @@ class TestCheckAndRepair:
 
     def test_failed_check_repairs_weakest_step(self, science_graph):
         # hop0 is the least certain step (0.5); its runner-up DEVELOPED:in is tried.
+        # BORN_IN:in leads on, so hop1 is a Choice; DEVELOPED:in leads only
+        # back the way it came, so on the repaired run hop1 is forced.
         model = ScriptedModel(
-            choices=["count", "BORN_IN:in", "stop", "none"] * 2,
-            probs=[0.9, 0.5, 0.9, 0.9] * 2,
+            choices=["count", "BORN_IN:in", "stop", "none"] + ["count", "BORN_IN:in", "none"],
+            probs=[0.9, 0.5, 0.9, 0.9] + [0.9, 0.5, 0.9],
             nouls=[0.2, 0.9],
         )
         result = _run(science_graph, model, AE1, ["Calculus"])
@@ -57,14 +59,14 @@ class TestCheckAndRepair:
         assert _run(science_graph, model, AE1, ["Calculus"]) is None
 
     def test_low_confidence_plan_is_not_checked(self, science_graph):
-        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"], prob=0.2)
+        model = ScriptedModel(choices=["count", "DEVELOPED:in"], prob=0.2)
         assert _run(science_graph, model, AE1, ["Calculus"], min_confidence=0.3) is None
         assert model.noul_calls == 0
 
 
 class TestFactsAndAnswers:
     def test_count_answer_names_the_entities(self, science_graph):
-        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"], nouls=[0.9])
+        model = ScriptedModel(choices=["count", "DEVELOPED:in"], nouls=[0.9])
         result = _run(science_graph, model, AE1, ["Calculus"])
         assert result.answer.startswith("1 ")
         assert "Gottfried Leibniz" in result.answer
@@ -107,7 +109,7 @@ class TestFailures:
     def test_db_error_returns_none(self, science_graph, caplog):
         db = MagicMock(wraps=science_graph)
         db.run_read_query.side_effect = RuntimeError("disk gone")
-        model = ScriptedModel(choices=["count", "DEVELOPED:in", "stop"], nouls=[0.9])
+        model = ScriptedModel(choices=["count", "DEVELOPED:in"], nouls=[0.9])
         with caplog.at_level(logging.WARNING):
             assert _run(db, model, AE1, ["Calculus"]) is None
         assert "disk gone" in caplog.text
