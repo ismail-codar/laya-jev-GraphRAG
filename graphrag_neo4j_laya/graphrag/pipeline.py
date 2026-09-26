@@ -146,7 +146,8 @@ class GraphRAGPipeline:
                 self._aggregate_warned = True
             return None
         if self._aggregate is None:
-            planner = GuidedQueryPlanner(self._db, load_relation_schema(settings.relation_schema_path))
+            schema = load_relation_schema(settings.relation_schema_path)
+            planner = GuidedQueryPlanner(self._db, schema.descriptions, schema.words)
             self._aggregate = AggregateExecutor(self._db, planner)
         return self._aggregate
 

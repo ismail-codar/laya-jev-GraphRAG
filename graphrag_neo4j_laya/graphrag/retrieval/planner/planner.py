@@ -124,8 +124,31 @@ class _Planning:
     # ── steps ────────────────────────────────────────────────────────────────
 
     def operation(self) -> None:
+        # Every operation error measured on the labelled set was a `group`
+        # question read as something else, or `rank` chosen for a question with
+        # nothing to rank, so the wording decides what it can and the model
+        # picks among the rest.
+        #
+        # "How many relations of each type ...?" asks for one answer per type;
+        # asked as a Choice, every such question came back as `count` or
+        # `list`. A superlative still goes to the Choice, where `rank` lives.
+        #
+        # "... at least 2 outgoing relations" compares a per-entity quantity
+        # with a number, which is a group plus a HAVING; counting the groups
+        # that pass is not expressible in this grammar anyway, so a threshold
+        # goes to `group` whichever way the question is phrased.
+        ranking = candidates.asks_for_a_ranking(self.question)
+        if not ranking and (candidates.asks_per_group(self.question)
+                            or candidates.sets_a_threshold(self.question)):
+            self.plan.operation = self.forced("operation", "group")
+            return
+        options = dict(_OPERATION_OPTIONS)
+        if not ranking:
+            options.pop("rank")          # nothing to order by
+        if candidates.asks_for_a_number(self.question):
+            options.pop("list")          # "how many" asks for a number, not for the entities
         self.plan.operation = self.choose("operation", "What kind of answer does the question ask for?",
-                                          _OPERATION_OPTIONS)
+                                          options)
 
     def start(self, seeds: list[str]) -> None:
         # Measured as the weakest step of the planner: asked as a Choice, the
@@ -149,6 +172,8 @@ class _Planning:
         return [r[f"{probe.target}_name"] for r in rows]
 
     def hops(self) -> None:
+        least, exact = candidates.hops_asked_for(self.question, self.p.relation_schema,
+                                                 self.p.relation_words)
         for i in range(self.p.max_hops):
             step = f"hop{i}"
             moves = self.p.db.frontier_moves(self.frontier())
@@ -156,13 +181,57 @@ class _Planning:
                 self.forced(step, "stop")
                 return
             options = candidates.hop_options(self.plan, moves, self.p.relation_schema)
-            # An anchored plan that stops before its first hop returns the
-            # anchor itself, which answers no aggregate question. Measured:
-            # offered `stop` here, the model took it — anchoring the start
-            # halved hop accuracy because the plans came out zero-hop.
-            if i == 0 and self.plan.start:
+            if i == 0:
+                # Whether the answer needs a relation at all is readable from
+                # the question, and measured as the model's worst decision: of
+                # the ten questions that start from the whole graph it got the
+                # first hop right in three.
+                #
+                # A question that names no relation ("How many theories are
+                # there in the graph?") is about the entities themselves, so
+                # the plan stays at the start node. Every other plan takes at
+                # least one hop: an anchored plan that stops here returns the
+                # anchor itself, which answers no aggregate question, and a
+                # question that does name a relation is asking about it.
+                if not self.plan.start and not candidates.mentions_a_relation(
+                        self.question, self.p.relation_schema, self.p.relation_words):
+                    self.forced(step, "stop")
+                    return
                 options.pop("stop")
-            selected = self.choose(step, _HOP_INSTRUCTION, options)
+                # If the question names one relation type and no other, the
+                # first hop is the one its verb describes ("... that Isaac
+                # Newton authored"), so `any` and the other types go. Naming
+                # two says nothing about which comes first, and the words are
+                # read out of the schema's own descriptions, so a schema
+                # written in another language than the question matches
+                # nothing and the model keeps the whole choice.
+                named = candidates.names_one_relation(self.question, self.p.relation_schema,
+                                                      self.p.relation_words)
+                if named:
+                    options = candidates.only_this_relation(options, named)
+            elif i < least:
+                # The question asks for a longer path than the plan has
+                # walked. Measured: offered `stop` here, the model took it in
+                # all four two-hop questions of the labelled set.
+                options.pop("stop")
+            elif exact:
+                # It said how many steps, and the plan has taken them.
+                self.forced(step, "stop")
+                return
+            if i and not candidates.asks_for_the_others(self.question):
+                # Reversing the hop just taken walks back to the entities the
+                # plan came from, so it answers nothing the plan does not
+                # already hold — unless that is the question ("who else was
+                # born where Einstein was born"), which says so in words.
+                # Kept when it is all that is left, so that the plan stops
+                # rather than losing its only move.
+                back = candidates.the_way_back(self.plan.hops[-1])
+                if back in options and len(options) > 1:
+                    options.pop(back)
+            # One option is not a choice, and asking would let a meaningless
+            # probability into the plan's confidence.
+            selected = (self.forced(step, next(iter(options))) if len(options) == 1
+                        else self.choose(step, _HOP_INSTRUCTION, options))
             if selected == "stop":
                 return
             rel_type, direction = selected.split(":")
@@ -186,33 +255,71 @@ class _Planning:
     def shape(self, numbers: list[int | float]) -> None:
         if self.plan.operation not in ("group", "rank"):
             return
+        # Asked one by one, every key came back yes: on the labelled set the
+        # per-key probabilities sat between 0.75 and 0.96 whether the key was
+        # the right one or not, and five-key groups came out of questions
+        # whose answer has one. So the field is read from the question and
+        # the model picks which entity's field it is, as a single Choice.
         keys = candidates.group_key_candidates(self.plan)
-        questions = {
-            f"key:{v}.{f}": {"type": "noul", "instruction": f"Should the answer be broken down per {_key_words(v, f)}?"}
-            for v, f in keys
-        }
-        answers = self.model.ask_batch(self.context(), questions)
-        probs = {name: answers[name].score for name in questions}
-        kept = [name for name, p in probs.items() if p >= _KEEP_THRESHOLD] or [max(probs, key=probs.get)]
-        for name in kept:
-            self.trace.append(StepTrace(name, ["yes", "no"], "yes", max(probs[name], 1 - probs[name])))
-            v, f = name[4:].split(".")
-            self.plan.keys.append(FieldRef(v, f))
+        field = candidates.grouped_by(self.question)
+        keys = [(v, f) for v, f in keys if f == field] or keys
+        if field == "name" and len(self.plan.hops) == 1:
+            # On a one-hop plan, grouping by the far end is the same question
+            # asked with the hop reversed, and the direction has already been
+            # read from the wording. Measured: offered both ends, the model
+            # took the far one every time, and no labelled answer wants it.
+            keys = [(v, f) for v, f in keys if v == "v0"] or keys
+        options = {f"{v}.{f}": _key_words(v, f, self.plan) for v, f in keys}
+        chosen = (self.forced("key", next(iter(options))) if len(options) == 1
+                  else self.choose("key", "What is the answer broken down by?", options))
+        self.plan.keys.append(FieldRef(*chosen.split(".")))
 
-        metric = _parse_metric(self.choose("metric", "What should be computed for each group?",
-                                           _metric_options(self.plan)))
+        said = candidates.metric_from_wording(self.question, self.plan, field)
+        metric = _parse_metric(
+            self.forced("metric", said) if said
+            else self.choose("metric", "What should be computed for each group?",
+                             _metric_options(self.plan, self.question)))
         self.plan.metrics.append(metric)
         if self.plan.operation == "rank":
             self.plan.order = [Order(metric, descending=True)]
             self.plan.limit = candidates.small_limit(numbers)
         elif metric.op in LIST_METRIC_OPS:
             pass  # a list of values cannot be compared with a number
+        elif numbers and (said_op := candidates.comparison_from_wording(self.question)):
+            # "at least 2" is the HAVING, operator and all: asking whether to
+            # add one, and which way it compares, asks the question twice.
+            self.forced("having", "yes")
+            self.forced("having_op", said_op)
+            self.plan.having.append(Having(metric, said_op, self._number("having_value", numbers)))
         elif numbers and self.yes("having", _HAVING_INSTRUCTION):
             op = self.choose("having_op", "How is the group value compared with the number?", _COMPARISON_OPTIONS)
             self.plan.having.append(Having(metric, op, self._number("having_value", numbers)))
 
     def semantic_step(self) -> None:
-        kind = self.choose("semantic", semantic_filter.PREDICATE_INSTRUCTION, semantic_filter.PREDICATE_KINDS)
+        # The filter keeps only entities of one kind, so it is worth asking
+        # about only for a kind the question actually names — and not for one
+        # a hop already guarantees: every BORN_IN target is a place, so "how
+        # many places was he born in" needs no filter on top, and a kind that
+        # names an entity in the middle of the path ("the work he wrote, and
+        # the concepts it relates to") is not a restriction on the answer
+        # either. Measured: offered all seven kinds, the step put one on four
+        # questions that ask for none and left it off two that need one.
+        words = semantic_filter.PREDICATE_WORDS
+        implied = {candidates.kind_implied_by(hop.rel_type, self.p.relation_schema, words)
+                   for hop in self.plan.hops}
+        named = [kind for kind in candidates.kinds_named(self.question, words)
+                 if kind not in implied]
+        if not named:
+            self.forced("semantic", semantic_filter.NO_PREDICATE)
+            return
+        if not self.plan.hops and len(named) == 1:
+            # A plan over the whole graph that walks nowhere returns every
+            # entity, so the kind is the only thing the question restricts.
+            self.semantic = self.forced("semantic", named[0])
+            return
+        options = {k: v for k, v in semantic_filter.PREDICATE_KINDS.items()
+                   if k == semantic_filter.NO_PREDICATE or k in named}
+        kind = self.choose("semantic", semantic_filter.PREDICATE_INSTRUCTION, options)
         if kind != semantic_filter.NO_PREDICATE:
             self.semantic = kind
 
@@ -224,26 +331,54 @@ class _Planning:
         return numbers[list(options).index(self.choose(step, "Which number from the question is meant?", options))]
 
 
-def _key_words(var: str, fld: str) -> str:
+def _key_words(var: str, fld: str, plan: QueryPlan) -> str:
     if var.startswith("e"):
         return f"relation type of step {int(var[1:]) + 1}"
-    who = "start entity" if var == "v0" else f"step-{var[1:]} entity"
-    return f"{'community' if fld == 'communityId' else 'name'} of the {who}"
+    return f"{'community' if fld == 'communityId' else 'name'} of {_which_entity(var, plan)}"
 
 
-def _metric_options(plan: QueryPlan) -> dict[str, str]:
+def _which_entity(var: str, plan: QueryPlan) -> str:
+    """
+    Which entity of the path *var* is, in words.
+
+    "the start entity" only means something when the plan starts somewhere:
+    for a plan over the whole graph, v0 is every entity the first relation
+    leaves from (or arrives at, if that relation is walked backwards).
+    """
+    step = int(var[1:])
+    if step:
+        return f"the step-{step} entity, at the far end of the path"
+    if plan.start:
+        return f"the entity the query starts at ({plan.start})"
+    if plan.hops:
+        arrow = "leaves from" if plan.hops[0].direction == "out" else "arrives at"
+        return f"the entity each step-1 relation {arrow}"
+    return "the entity"
+
+
+def _metric_options(plan: QueryPlan, question: str = "") -> dict[str, str]:
     target = plan.target
     options = {
         "count": "the number of matching paths or edges",
         f"count_distinct:{target}.name": "the number of distinct entities reached",
     }
+    # PageRank is the only number a node carries, and a question that wants
+    # its average says so. Measured: offered unasked, it was chosen for four
+    # questions that ask how many relations a group has.
     words = {"sum": "total", "avg": "average", "min": "lowest", "max": "highest"}
-    for v in candidates.node_vars(plan):
-        who = "start entity" if v == "v0" else f"step-{v[1:]} entity"
-        for op, word in words.items():
-            options[f"{op}:{v}.pagerank"] = f"the {word} PageRank (importance) of the {who}"
-    # A list cannot be ordered, so `collect` is offered to group plans only.
-    if plan.operation != "rank":
+    if candidates.asks_about_importance(question):
+        for v in candidates.node_vars(plan):
+            for op, word in words.items():
+                options[f"{op}:{v}.pagerank"] = (
+                    f"the {word} PageRank (importance) of {_which_entity(v, plan)}")
+    # A list cannot be ordered, compared with a number, or read as a count,
+    # so `collect` is offered only where the answer may be a list: not to a
+    # `rank`, not to a question asking how many, and not to one that compares
+    # the group with a number.
+    lists_allowed = (plan.operation != "rank"
+                     and not candidates.asks_for_a_number(question)
+                     and not candidates.sets_a_threshold(question))
+    if lists_allowed:
         for e in candidates.edge_vars(plan):
             step = int(e[1:]) + 1
             options[f"collect:{e}.type"] = (
@@ -272,11 +407,13 @@ class GuidedQueryPlanner:
         self,
         db,
         relation_schema: dict[str, str] | None = None,
+        relation_words: dict[str, tuple[str, ...]] | None = None,
         max_hops: int | None = None,
         row_limit: int | None = None,
     ) -> None:
         self.db = db
         self.relation_schema = relation_schema or {}
+        self.relation_words = relation_words or {}
         self.max_hops = max_hops if max_hops is not None else settings.aggregate_max_hops
         self.row_limit = row_limit if row_limit is not None else settings.aggregate_row_limit
 

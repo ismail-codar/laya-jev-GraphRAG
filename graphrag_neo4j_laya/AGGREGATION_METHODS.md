@@ -724,12 +724,90 @@ Tüm düğümleri taramak ölçeklenmez. Büyük graph'ta adaylar önce daraltı
 
 Yöntem 1–3'teki sabit şablonlar yerine sorguyu **adım adım** kurar. Her adımda yasal hamleleri kod üretir, Laya yalnızca aralarından seçer:
 
-1. İşlem (`Choice`): `count`, `list`, `rank`, `group`.
+1. İşlem (**kod + `Choice`**): `count`, `list`, `rank`, `group`. İfadenin tek başına belirlediği
+   durumlarda kod karar verir, kalanını model seçer:
+   - Dağıtıcı bir işaret varsa ("of each type", "her ilişki türünden") cevap kategori başına bir
+     satırdır → `group`. İngilizce "every" işaret sayılmaz ("list every place" düz bir listedir),
+     Türkçe "her şey" / "her biri" de sayılmaz: ikisi de bölünecek bir sınıf adlandırmıyor.
+   - Bir sayıyla karşılaştırma varsa ("at least 2", "1'den fazla") grup başına bir koşul vardır →
+     `group` + `HAVING`. Koşulu geçen grupları saymak bu gramerde zaten ifade edilemiyor.
+   - Üstünlük bildiren bir sözcük yoksa `rank` sunulmaz — sıralanacak bir büyüklük yok. Üstünlük
+     varsa iki kural da devreye girmez, karar `Choice`'a kalır.
+   - "how many" / "kaç" soruyorsa `list` sunulmaz: soru sayı istiyor, varlıkları değil.
 2. Başlangıç (**kod**): seed'in adı soruda geçiyorsa o varlık, geçmiyorsa bütün graph. Model'e sorulmaz; eşleşme kelime sınırında yapılır, Türkçe'de kesme işaretiyle gelen ekler sınır sayılır ("Calculus'a"), çok kelimeli adlar son kelimesiyle de eşleşir ("Einstein'ın"). Gerekçe ölçümde: `Choice` olarak sorulduğunda model, seed'ini adıyla anan 14 sorunun hepsinde "bütün graph" dedi.
-3. Hop döngüsü (`Choice`, en fazla `aggregate_max_hops=3`): seçenekler o anki sınırdan (frontier) **gerçekten çıkan** ilişki tipi × yön çiftleri, bir yönde birden fazla tip varsa `any:<yön>`, ve `stop`. Graph'ta olmayan bir ilişki ya da yön seçilemez. Anchor'lı planlarda `stop` **hop0'da sunulmaz**: sıfır hop'luk bir anchor planı anchor'ın kendisini döndürür, yani hiçbir agregasyon sorusunu cevaplamaz. Ölçümdeki en büyük tek kazanç bu kısıt (aşağıda).
+3. Hop döngüsü (**kod + `Choice`**, en fazla `aggregate_max_hops=3`): seçenekler o anki sınırdan
+   (frontier) **gerçekten çıkan** ilişki tipi × yön çiftleri, bir yönde birden fazla tip varsa
+   `any:<yön>`, ve `stop`. Graph'ta olmayan bir ilişki ya da yön seçilemez. İlk hop'ta üç kural
+   kodda:
+   - Soru hiçbir ilişkiden söz etmiyorsa ("Graph'ta kaç kişi var?") cevap varlıkların kendisidir,
+     plan başlangıç düğümünde kalır — `stop` zorlanır.
+   - Diğer her planda en az bir hop var, yani `stop` **sunulmaz**: sıfır hop'luk bir anchor planı
+     anchor'ın kendisini döndürür, ilişkiden söz eden bir soru da o ilişkiyi soruyordur.
+   - Soru tek bir ilişki tipini adıyla anıyorsa ("… that Isaac Newton authored") ilk hop odur:
+     `any` ve diğer tipler seçeneklerden çıkar, yön modele kalır. İki tip birden anılıyorsa
+     hangisinin önce geldiği belli değildir, seçenekler olduğu gibi kalır.
+
+   Sonraki hop'larda iki kural var. Birincisi yolun uzunluğu: soru kaç adım istediğini
+   söylüyorsa ("exactly two steps away", "3 adım uzaklıkta") o sayıya varana dek `stop`
+   sunulmaz, varınca zorlanır. Soru ilişkiye iki kez atıfta bulunuyorsa — biri tipi adıyla, biri
+   geçerken ("everything that the theory Einstein **discovered** is **connected to**") — adı
+   geçen ilişki ortadaki varlığı tarif ediyordur, yani onun iki yanında birer adım vardır; bu
+   bir alt sınır, kesin sayı değil.
+
+   İkincisi geri dönüş: az önce atılan hop'un tersi (aynı tip, ters yön) sunulmaz, çünkü planın
+   az önce bulunduğu varlıklara geri götürür ve elinde olmayan hiçbir şey eklemez. Tek istisna
+   sorunun bunu istemesidir — "Einstein'ın doğduğu yerde doğan **başka** kim var?" tam olarak
+   `BORN_IN:out` sonrası `BORN_IN:in`'dir; "başka / other / else / diğer" geçiyorsa seçenek
+   yerinde kalır. Geri dönüş tek seçenekse de kalır: plan hamlesiz kalmaktansa durur.
+
+   Bir tipin adı iki yerden okunur. Birincisi şemanın kendi açıklaması: açıklama bir eylem öbeği
+   olduğu için ("wrote, published or authored a work") nesnesinden önceki sözcükler o ilişkinin
+   adıdır. Nesneyi de saysaydık "list every place in the graph" BORN_IN sorusu olurdu ("was born
+   in a place"). İkincisi şemanın ilişki başına verebildiği sözcük listesi — açıklamanın dilinde
+   olmayan sorular için:
+
+   ```json
+   "AUTHORED": {"description": "wrote, published or authored a work",
+                "words": ["yazdı", "yazan", "yazar", "yazmış", "yayımla", "yayınla"]}
+   ```
+
+   Listedeki sözcük, sorudaki sözcüğün **başında** aranır; Türkçe ekler böyle karşılanıyor
+   ("yazdı" → "yazdığı"). Açıklama sözcükleri ise tam eşleşir, çünkü İngilizce az çekimleniyor ve
+   önek eşleşmesi "born"u "borne"a bağlardı. Şema yalnız açıklama da taşıyabilir (eski biçim);
+   o zaman sorunun dili açıklamanınkiyle aynı değilse karar modele kalır.
 4. Filtreler: iki ve daha fazla hop'ta başlangıç varlığını hariç tutma (`Noul`); soruda sayı varsa sayısal filtre (alan, operatör ve değer; değer sorudan regex ile çıkar).
-5. Şekil (`group` / `rank`): gruplama anahtarları tek `ask_batch` çağrısıyla, metrik `Choice` ile (`count`, `count_distinct`, düğüm `pagerank`'i üzerinde `sum`/`avg`/`min`/`max`, ve yalnız `group` planlarında adım başına `collect:e<i>.type`; liste sıralanamadığı için `rank`'e sunulmaz); `rank` için `limit` sorudaki sayıdan; soruda sayı varsa `HAVING`.
-6. Anlamsal filtre (`Choice`, kapalı liste): `none`, `person`, `theory`, `place`, `work`, `organisation`, `phenomenon`. Seçilirse Yöntem 5 çalışır: adaylar DB'den gelir, her biri `Noul` ile bantlanır (≥ 0,70 kesin, ≤ 0,30 hayır) ve kesin küme `IN` filtresi olarak plana eklenir. Sonuç `[kesin, kesin + belirsiz]` aralığıdır.
+5. Şekil (**kod + `Choice`**, `group` / `rank`): cevabın neye göre bölündüğü, ne hesaplandığı ve
+   grubun bir sayıyla nasıl karşılaştırıldığı — üçü de ifadeden okunabildiği ölçüde kodda.
+   - **Anahtar tek tanedir.** Alan sorudan okunur: dağıtıcı işaretin hemen ardındaki ad
+     ("of each **type**", "Her **varlık**"), işaret yoksa sorunun bütünü; "tür/tip" ilişki
+     tipini, "topluluk/community" topluluğu, gerisi varlığın adını seçer. Kalan adaylar arasından
+     model seçer — tek adaya düşerse sorulmaz. Tek hop'lu bir planda yolun uzak ucuyla gruplamak,
+     aynı soruyu hop'u ters çevirerek sormaktır ve yön zaten ifadeden geliyor, o yüzden ad alanı
+     için `v0` alınır; daha uzun yollarda uç modele bırakılır.
+   - **Metrik**: soru kaç tane olduğunu soruyorsa, grubu bir sayıyla karşılaştırıyorsa ya da
+     sıralıyorsa metrik bir sayımdır — "farklı/distinct" diyorsa `count_distinct:<hedef>.name`,
+     demiyorsa `count`. "Hangi ilişki tipleri" gibi bir soru, başka bir şeye göre gruplanmışsa
+     tipleri listeler (`collect:e<i>.type`). Soru önemden söz ediyorsa (`pagerank`, "önemli")
+     `sum`/`avg`/`min`/`max` seçenekleri açılır ve karar `Choice`'a kalır. `collect` yalnız
+     cevabın liste olabildiği yerde sunulur: `rank`'e değil, sayı isteyen ya da bir sayıyla
+     karşılaştıran soruya değil.
+   - **`HAVING`**: eşiği kuran ifade operatörü de söylüyor ("at least 2" → `>= 2`,
+     "1'den fazla" → `> 1`), o yüzden hem varlığı hem operatörü kodda; değer sorudaki sayıdır.
+     Eşik ifadesi yoksa eskisi gibi `Noul` + `Choice` sorulur.
+   - `rank` için `limit` sorudaki sayıdan.
+6. Anlamsal filtre (**kod + `Choice`**, kapalı liste): `none`, `person`, `theory`, `place`, `work`,
+   `organisation`, `phenomenon`. Filtre yalnız sorunun gerçekten andığı bir tür için sorulur —
+   yüklemlerin her birinin sözcükleri kodda, iki dilde, çünkü liste sabit (ilişki şemasının
+   aksine dosyadan gelmiyor). Anılan tür bir hop'un zaten garanti ettiği türse düşürülür: her
+   `BORN_IN` hedefi bir yerdir, o yüzden "kaç **yerde** doğdu" üstüne filtre istemez; yolun
+   ortasındaki varlığı adlandıran tür de ("yazdığı **eserle** ilişkili kavramlar") cevaba
+   konacak bir kısıt değildir. İmayı şema kendisi söylüyor: açıklamanın nesnesi hedefin türüdür
+   ("was born in **a place**"). Geriye tür kalmazsa `none` zorlanır; plan hiç hop atmıyorsa ve
+   tek tür kaldıysa o tür zorlanır (bütün graph üzerinde sıfır hop'luk bir plan her varlığı
+   döndürür, sorunun verdiği tek kısıt türdür); kalan durumda `Choice` sorulur.
+   Seçilirse Yöntem 5 çalışır: adaylar DB'den gelir, her biri `Noul` ile bantlanır (≥ 0,70 kesin,
+   ≤ 0,30 hayır) ve kesin küme `IN` filtresi olarak plana eklenir. Sonuç `[kesin, kesin +
+   belirsiz]` aralığıdır.
 
 Sonra plan (tipli bir AST, `plan.py`) parametreli Kùzu Cypher'a çevrilir. Tanımlayıcılar beyaz listeden gelir, bütün değerler parametredir. Planın İngilizce açıklaması soruya karşı bir kez `Noul` ile kontrol edilir ("Bu sorgu soruyu cevaplıyor mu?"). Kontrol geçmezse en küçük marjlı adım ikinci seçenekle değiştirilip plan bir kez daha kurulur. Plan güveni en zayıf adımın olasılığıdır. Güven düşükse ya da kontrol geçmezse `None` döner ve pipeline eski rotalara düşer.
 
@@ -752,46 +830,69 @@ Yöntem 1–5'in yapamadığı çok adımlı yol filtreleri de bu yolla ifade ed
 
 Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `examples/data/aggregate_eval.json`, 34 soru: 10 basit, 7 gruplu / filtreli, 4 iki hop'lu, 3 anlamsal filtreli agregasyon, ve 10 agregasyon olmayan soru; 14'ü Türkçe. Seed'ler setten gelir, yani seed seçim hataları sayılara karışmaz. Laya `multilingual` checkpoint, CPU, 2026-09-25.
 
-> Aşağıdaki tablo iki değişiklikten sonraki ölçüm: başlangıç adımı koda alındı ve anchor'lı
-> planlarda `stop` hop0'da sunulmuyor. Parantezdeki değerler, yalnız başlangıç değişikliğinin
-> olduğu bir önceki ölçüm — yani parantezler `stop` kısıtının tek başına etkisini gösteriyor.
+> Aşağıdaki tablo anlamsal filtre adımı sağlamlaştırıldıktan sonraki ölçüm. Parantezdeki
+> değerler bir önceki ölçüm — diğer adımların hepsi bugünkü hâlindeydi, yalnız tür seçimi yedi
+> seçenekli düz bir `Choice`'tı.
 
 | Ölçüm | Sonuç | Bayrak hedefi |
 | --- | --- | --- |
-| İşlem doğruluğu | %70,8 (değişmedi) | |
+| İşlem doğruluğu | %100 — kod + `Choice` | |
 | Başlangıç doğruluğu | %100 — kod kararı | |
-| Hop tipi / yön / durma | **%37,5 / %50,0 / %54,2** (önce %8,3 / %8,3 / %12,5) | yön ≥ %90 |
-| Filtre / anahtar / metrik / `HAVING` | %83,3 / %75,0 / %66,7 / %91,7 (değişmedi) | |
-| Anlamsal filtre adımı | **%79,2** (önce %70,8) | |
-| Tam plan eşleşmesi | **%12,5** (3 / 24 — önce 0) | |
-| Sonuç eşleşmesi | **%16,7** (4 / 24, 3'ü tam doğru planla — önce %8,3, ikisi de tesadüfen) | ≥ %80 |
+| Hop tipi / yön / durma | %95,8 / %91,7 / %95,8 (değişmedi) | yön ≥ %90 **✓** |
+| Filtre / anahtar / metrik / `HAVING` | %83,3 / %100 / %100 / %100 (değişmedi) | |
+| Anlamsal filtre adımı | **%95,8** (önce %70,8) | |
+| Tam plan eşleşmesi | **%75,0** (18 / 24 — önce %50,0) | |
+| Sonuç eşleşmesi | **%91,7** (22 / 24 — önce %66,7) | ≥ %80 **✓** |
 | Agregasyon sorusunu `aggregate`'e yönlendirme | %37,5 (değişmedi) | |
 | Yanlış yönlendirme (agregasyon olmayan → `aggregate`) | %10 (1 / 10) | %0 |
 | Geri çeviri kontrolü: doğru planı geçirme / yanlış planı reddetme | %50,0 / %66,7 (değişmedi) | |
-| Min ve çarpım güveninin ayırma gücü | **min %87,3 · çarpım %77,8** (ilk kez ölçülebildi) | |
-| Dil kırılımı (tam plan · sonuç) | en %14,3 · %14,3 — tr %10,0 · %20,0 | |
-| Gecikme (ortalama) | yönlendirme 0,19 sn · plan 0,95 sn | |
-| Soru başına çağrı | 3,9 `Choice` · 1,5 `Noul` · 0,1 `ask_batch` | |
+| Min ve çarpım güveninin ayırma gücü | **min %85,2 · çarpım %84,3** (önce %62,5 · %56,2) | |
+| Dil kırılımı (tam plan · sonuç) | en **%71,4 · %85,7** — tr **%80,0 · %100** | |
+| Gecikme (ortalama) | yönlendirme 0,25 sn · plan 0,86 sn | |
+| Soru başına çağrı | **2,7 `Choice`** · 1,6 `Noul` · 0,0 `ask_batch` | |
 
-Üç bayrak hedefinin üçü de tutmadı. Router rotası kapalı kalır.
+Üç bayrak hedefinin ikisi tuttu: sonuç eşleşmesi %91,7 ≥ %80 ve hop yönü %91,7 ≥ %90. Tutmayan tek hedef yanlış yönlendirme (%10, hedef %0) ve o planlayıcıda değil router'da; `aggregate` yönlendirmesi %37,5'te duruyor. Router rotası bu yüzden kapalı kalır.
 
 ### Bulgular
 
 - **Başlangıç adımı koda alındı, tek başına hiçbir şeyi açmadı.** `Choice` olarak sorulduğunda Laya, seed'ini adıyla anan 14 sorunun hiçbirinde seed'i seçmiyordu ("How many places was Isaac Newton born in?" için P(bütün graph) = 0,995; iki farklı ifadeyle denendi, seed hatırlama 8 soruda 0–2'de kaldı). Adım koda alınınca doğruluk %100 oldu, ama sonraki adımların hiçbiri düzelmedi; hop tipi %16,7'den %8,3'e, durma %25,0'ten %12,5'e **düştü**. "Başlangıç yanlış olunca sonraki bütün hop'lar da yanlış oluyor" varsayımı yanlışmış.
 - **Gerçek sebep `stop` seçeneğiydi.** Gerileyen beş sorunun (s07, s08, s09, g01, g05) hepsi seed'liydi ve hepsinde aynı şey oluyordu: anchor konunca model **hop0'da `stop`** diyor, sıfır hop'luk bir plan kuruyordu. Örnek s07, "List all entities that discovered Gravitational Waves", altın plan `DISCOVERED:in`: `Gravitational Waves` üzerinde başlayıp hiç hop atmadan duruyor, üstüne gereksiz bir anlamsal filtre ekliyordu. `stop` açıklaması ("şu ana kadar ulaşılan varlıklar sorunun sorduğu varlıklar") frontier tam da anchor'ken fazla doğru görünüyor.
 - **`stop`'u anchor'lı planların hop0'ında sunmamak ölçümdeki en büyük kazanç.** Sıfır hop'luk bir anchor planı zaten anchor'ın kendisini döndürüyor, yani hiçbir agregasyon sorusunu cevaplayamıyor; setteki sıfır hop'lu altın planların hepsi de anchor'sız. Kısıt konunca **hop tipi %8,3 → %37,5, yön %8,3 → %50,0, durma %12,5 → %54,2**, anlamsal filtre %70,8 → %79,2. Hiçbir adım gerilemedi. Tam plan eşleşmesi ilk kez sıfırdan çıktı (%12,5; s01, s09, s10) ve sonuç eşleşmesi ikiye katlandı — üstelik artık 4 isabetin 3'ü tam doğru plandan geliyor, önceki 2 isabetin ikisi de tesadüftü.
-- **Hop seçimi hâlâ ölçümün zayıf halkası.** Yön %50,0, bayrak hedefi %90. İki hop'lu dört sorunun hiçbiri tam tutmuyor.
-- **KTD5 doğrulandı.** Doğru plan çıkmaya başlayınca güven ayırma gücü ilk kez ölçülebildi: en zayıf adım %87,3, adım olasılıklarının çarpımı %77,8. Yani "plan güveni çarpım değil, en zayıf adımdır" kararı ölçümle destekleniyor.
+- **İşlem adımı üç kuralla kapandı: %70,8 → %100.** Ölçülen yedi işlem hatasının hepsi aynı iki kalıptaydı: `group` sorusu `count` ya da `list` okunuyor, ya da sıralanacak bir şey olmayan soruda `rank` seçiliyordu. Sırayla: (a) üstünlük bildiren bir sözcük yoksa `rank` sunulmuyor, (b) "kaç / how many" sorularında `list` sunulmuyor — bu ikisi işlemi %75,0'e çıkardı ve `m02`'yi ("Graph'ta kaç kişi var?") ilk kez tam doğru plana oturttu; (c) dağıtıcı işaret ("of each type", "her ilişki türünden") `group`'u zorluyor — %91,7; (d) bir sayıyla karşılaştırma ("at least 2", "1'den fazla") `group`'u zorluyor — %100. İşaretler etiketli setin 34 sorusunun tam olarak 7'sinde geçiyor ve hepsi altın planı `group` ya da `rank` olan sorular; sıfır yanlış pozitif.
+- **İşlem düzelince arkasındaki adımlar da düzeldi:** anahtar %75,0 → %87,5, metrik %66,7 → %75,0. Bir `list` planında şekil adımı hiç çalışmadığı için yanlış işlem, anahtar ve metriği de beraberinde götürüyordu. Güven ayırma gücü de arttı (min %87,3 → %93,8).
+- **Kazanç tam plana yansımadı.** Sonuç eşleşmesi %16,7 → %20,8, tam plan %12,5 → %16,7: yalnız `m02` eklendi. Yedi sorunun işlemi düzeldi ama hiçbirinin planı tam tutmadı, çünkü aynı sorularda hop'lar hâlâ yanlış (`g02` "LEADS:in" ile başlıyor, `g06` ilişki tipi yerine varlık adına göre grupluyor). Tek gerileme `g05`'te: plan `group`'a dönünce model gereksiz bir anlamsal filtre ekledi (anlamsal adım %79,2 → %75,0).
+- **İlk hop'un ilişki gerektirip gerektirmediği ifadeden okunuyor: hop tipi %37,5 → %66,7.** Bütün graph'tan başlayan on sorunun ilk hop'unu model üçünde doğru veriyordu. Soru hiçbir ilişkiden söz etmiyorsa ("How many theories are there in the graph?") cevap varlıkların kendisidir ve plan başlangıçta kalır; söz ediyorsa en az bir hop vardır. Kural etiketli setin on sorusunun dokuzunda altın plana uyuyor. Tek istisna `s05`: "Graph'ta kaç şey keşfedilmiş?" ilişkiyi Türkçe bir eylemle anıyor, sözcük listesi ise İngilizce — soru ilişkisiz sayılıp sıfır hop'a düşüyor (eskiden şans eseri doğru sonucu veren yanlış bir plan kuruyordu, o da gitti). Hop tipi/yön/durma altı soruda birden düzeldi (`s04`, `m01`, `g03`, `g04`, `g06`, `g07`).
+- **Soru tek bir ilişki tipini anıyorsa ilk hop odur: hop tipi %66,7 → %75,0.** `any:out` modelin varsayılan cevabı gibi davranıyordu; soru ilişkiyi adıyla andığında bile onu seçiyordu (`s02` "born in", `s06` "authored"). Tipi anan soruda `any` ve diğer tipler seçeneklerden çıkarılınca `s02`, `s06`, `s07` ve `t02`'nin ilk hop'u düzeldi; `s02` ilk kez uçtan uca doğru. Yön modele bırakıldı, çünkü aynı tip iki yönde de bulunabiliyor.
+- **İlişkinin adı şemanın kendi açıklamasından çıkıyor, elle yazılmıyor.** Açıklamalar eylem öbeği ("wrote, published or authored a work"), dolayısıyla nesnesinden önceki sözcükler ilişkinin adıdır: `AUTHORED` → wrote/published/authored, `BORN_IN` → born, `RELATED_TO` → hiçbiri ("any other relationship"). Nesne de sayılsaydı "list every place in the graph" BORN_IN sorusu olurdu. Etiketli setin 24 agregasyon sorusundan beşi tek bir tip anıyor ve dördünde altın ilk hop tam o tip; beşincisi `t04`, orada anılan tip ikinci hop'a ait — ama `t04`'ün hop'ları zaten baştan sona yanlış olduğu için ölçüm kaybı yok.
+- **Şema ilişki sözcüklerini taşıyınca Türkçe de kapandı: hop tipi %75,0 → %79,2, sonuç %25,0 → %33,3.** Açıklamalar İngilizce olduğu için "kaç eser **yazdı**", "kaç şey **keşfedilmiş**", "**yazdığı** eserle" hiçbir tipi anmıyordu — model değil, veri eksiğiydi. Şema girdisi artık açıklamanın yanında o ilişkiyi adlandıran sözcükleri de taşıyabiliyor; sözcük sorudaki sözcüğün başında aranıyor, böylece Türkçe ekler tek bir kökle karşılanıyor ("yazdı" → "yazdığı"). Sözcükler ilişkinin anlamından yazıldı, sorulardan değil — ve `doğdu`/`doğum` yerine `doğ` yazılsaydı "doğrudan bağlı olduğu varlıklar" (`s08`) BORN_IN sorusu olurdu. Etiketli setin sekiz sorusu artık bir tip anıyor, yedisinde altın ilk hop tam o tip. Türkçe tam plan %20,0 → %30,0, Türkçe sonuç %20,0 → %40,0; hiçbir soru gerilemedi.
+- **Yolun uzunluğu da ifadeden okunuyor: durma %79,2 → %91,7.** İki hop'lu dört sorunun dördü de ilk hop'tan sonra duruyordu. İki okuma ikinci adımı veriyor: soru kaç adım olduğunu söyleyebilir ("exactly two steps away" — kesin sayı), ya da ilişkiye iki kez atıfta bulunabilir, biri tipi adıyla biri geçerken ("everything that the theory Einstein **discovered** is **connected to**") — adı geçen ilişki ortadaki varlığı tarif ettiği için onun iki yanında birer adım vardır. İkincisi alt sınır olarak uygulanıyor. Etiketli setin 24 sorusunun tam dördünde iki adım isteniyor ve o dördü tam olarak altın planı iki hop'lu olanlar; hiçbir soruda fazla adım istenmiyor.
+- **`t01` uçtan uca düzeldi**, `t02`/`t03` ikinci adımı artık atıyor ama **geldiği yoldan geri dönüyor**: `DISCOVERED:out` sonrası `DISCOVERED:in`, `AUTHORED:out` sonrası `AUTHORED:in`. Aynı tipin tersi, planın az önce bulunduğu varlıklara geri götürüyor. `t04` ise üçüncü bir hop atıyor (alt sınır kesin sayı olarak uygulanmadığı için). Filtre adımı bu sorularda devreye girdiği için %75,0 → %83,3, sonuç eşleşmesi %33,3 → %37,5.
+- **Geri dönüşü seçeneklerden çıkarmak ikinci hop'u çözdü: hop tipi %83,3 → %95,8, yön %79,2 → %91,7.** İkinci adımı atmaya zorlanan model, üç soruda da az önce geldiği yoldan geri dönüyordu: `DISCOVERED:out` sonrası `DISCOVERED:in` (`s05`, `t02`), `AUTHORED:out` sonrası `AUTHORED:in` (`t03`). Aynı tipin tersi, planın az önce bulunduğu varlıklara geri götürür ve elinde olmayan hiçbir şey eklemez. Seçenek kaldırılınca üçü de tam altın hop'lara oturdu; `t03` uçtan uca doğru, `s05` fazladan hop'undan kurtuldu. **Hop yönü ilk kez bayrak hedefini tutturdu (%91,7 ≥ %90).**
+- **Ama geri dönüş her zaman yanlış değil — soru söylüyorsa doğru.** Kural önce kayıtsız şartsız kondu ve AE3 kabul senaryosunu kırdı: "Einstein'ın doğduğu yerde doğan **başka** kim var?" tam olarak `BORN_IN:out` sonrası `BORN_IN:in`'dir. İstisna sorudan okunuyor: "başka / other / else / diğer" geçiyorsa seçenek yerinde kalır. Etiketli sette bu yalnız `t04`'te geçiyor ve `t04` iki durumda da yanlış, yani istisnanın ölçüme maliyeti yok — kazandırdığı, gramerin bir soru biçimini kaybetmemesi.
+- **Kalan hop hataları ikiye indi:** `g02`'de yön ters (`any:in`, altın `any:out`) ve `t04` üç hop atıyor (alt sınır kesin sayı olarak uygulanmıyor).
+- **Gruplama anahtarı `ask_batch` ile sorulamıyor: %75,0 → %100.** Her aday ayrı bir evet/hayır sorusu olarak sorulduğunda olasılıklar ayırt etmiyordu — etiketli sette doğru anahtar da yanlışı da 0,75 ile 0,96 arasında geliyor, argmax yedi sorunun üçünü doğru veriyordu; eşiği geçen her aday alınınca da cevabı tek anahtarlı olan sorulardan beş anahtarlı gruplar çıkıyordu. Yerine: alan ifadeden okunuyor (dağıtıcı işaretin ardındaki ad — "of each **type**", "Her **varlık**"), kalan adaylar arasından model tek bir `Choice` ile seçiyor. Tek hop'lu planlarda ad alanı için yolun yakın ucu (`v0`) alınıyor; model üç soruda da uzak ucu seçiyordu ve hiçbir altın cevap onu istemiyor. Planlayıcı artık `ask_batch`'i hiç çağırmıyor.
+- **Metrik de ifadeden okunuyor: %83,3 → %100.** PageRank toplamları sorulmadan sunulduğunda, "her tipten kaç ilişki var" diye soran dört soruda seçildi; kaldırılınca model bu kez altı grubun altısına da `count_distinct` dedi. Yani metrik `Choice`'ı bir tercihe saplanıyor. Kural: sayı isteyen, bir sayıyla karşılaştıran ya da sıralayan soruda metrik bir sayımdır ("farklı" diyorsa `count_distinct`, demiyorsa `count`); "hangi ilişki tiplerini" diye soran ve başka bir şeye göre gruplanan soruda `collect`; önemden söz eden soruda PageRank seçenekleri açılır ve karar modele kalır. Yedi gruplu sorunun yedisinde altın metrik çıkıyor.
+- **`HAVING` eşiğin kendisinden geliyor: %91,7 → %100.** "at least 2" hem bir `HAVING` olduğunu hem `>=` olduğunu söylüyor; ikisini de ayrı ayrı sormak aynı soruyu iki kez sormak. Operatör eşik ifadesinden okunuyor, değer sorudaki sayıdan; eşik ifadesi yoksa eskisi gibi soruluyor.
+- **Şekil adımı kapanınca sonuç eşleşmesi %41,7 → %66,7, tam plan %37,5 → %50,0.** Türkçe sonuç %80,0.
+- **Anlamsal filtre yalnız sorunun andığı tür için sorulunca %70,8 → %95,8.** Yedi seçenekli düz bir `Choice` olarak sorulduğunda adım, filtre istemeyen dört soruya filtre koyuyor (`s06`, `s07`, `s08`, `t02`), isteyen ikisinde koymuyordu (`m01`, `m03`). İki kural yetti: (a) soru bir tür adlandırmıyorsa filtre yoktur — "tüm varlıkları listele"de kısıtlanacak bir şey yok; (b) anılan türü bir hop zaten garanti ediyorsa filtre gereksizdir — her `BORN_IN` hedefi bir yerdir. İmayı şemanın kendi açıklaması veriyor: nesnesi hedefin türüdür ("was born in **a place**"), yani ilişki adlarını çıkarırken eleyerek attığım sözcükler tam da burada işe yarıyor. Üstüne bir de: plan hiç hop atmıyorsa ve tek tür kaldıysa o tür zorlanır, çünkü sıfır hop'luk bir plan her varlığı döndürür ve sorunun verdiği tek kısıt odur — `m01`, `m02`, `m03` böyle düzeldi. 24 sorunun 22'si kodda karara bağlanıyor ve 22'si de doğru.
+- **İki bayrak hedefi tuttu.** Sonuç eşleşmesi %66,7 → **%91,7** (hedef %80), hop yönü %91,7 (hedef %90). Tam plan %50,0 → %75,0, Türkçe sonuç %100. Güven ayırma gücü de geri geldi (min %62,5 → %85,2): adımlar doğru karar verdikçe doğru planların güveni yükseliyor. Soru başına `Choice` 3,4'ten 2,7'ye indi.
+- **Geriye iki soru kaldı.** `t02` ("List everything that the theory Albert Einstein discovered is connected to") koda bağlanamayan iki anlamsal sorudan biri; model `theory` diyor, oysa "theory" cevabı değil yolun ortasındaki varlığı tarif ediyor. `t04` ise hem üçüncü bir hop atıyor hem ikinci hop'un tipini kaçırıyor. Kalan adım hataları: başlangıç varlığını hariç tutma filtresi (%83,3) ve `g02`'de ters yön.
+- **Güven ayırma gücü düşmeye devam ediyor** (min %62,5, çarpım %56,2). Adımların çoğu artık kodda ve 1,0 olasılıkla kayda geçiyor; geriye kalan `Choice`'lar tam da modelin kararsız olduğu yerler. Soru başına `Choice` 3,4'e, plan süresi 0,67 sn'ye indi.
+- **Zorlanan adım arttıkça güven ayırma gücü düştü** (min %93,8 → %78,7). Kalan `Choice`'lar tam da belirsiz olanlar; kodun aldığı adımlar 1,0 olasılıkla kayda geçtiği için güvene karışmıyor. Aynı sebeple soru başına `Choice` 3,7'den 3,6'ya, plan süresi 1,05 sn'den 0,82 sn'ye indi.
+- **Hop düzelince şekil adımı zorlaştı.** Anahtar %87,5 → %75,0, filtre %83,3 → %75,0: daha önce sıfır hop'ta kalan sorular artık bir hop attığı için gruplama anahtarı adayları çoğaldı ve model yanılıyor. Anlamsal filtre de %75,0 → %70,8 (`s06` artık gereksiz bir filtre ekliyor). Yine de tam plan %16,7 → %25,0 ve sonuç %20,8 → %25,0: artık sonuç isabetlerinin **altısı da** tam doğru plandan geliyor.
+- **KTD5 doğrulandı.** Doğru plan çıkmaya başlayınca güven ayırma gücü ilk kez ölçülebildi: en zayıf adım %87,3, adım olasılıklarının çarpımı %77,8; işlem adımından sonra %93,8'e karşı %83,8. Yani "plan güveni çarpım değil, en zayıf adımdır" kararı ölçümle destekleniyor.
+- **Hop adımını seçenek başına `Noul`'a çevirmek işe yaramadı (denendi, geri alındı).** Çok yönlü tek `Choice` yerine her hamle için ayrı bir evet/hayır cümlesi soruldu ("To answer the question, should the query take this step? Step to entities it has a BORN_IN relation (born in a place) to."), hepsi tek `ask_batch` çağrısında. Sonuç her yerde geriledi: hop tipi %37,5 → %12,5, yön %50,0 → %20,8, durma %54,2 → %20,8, filtre %83,3 → %54,2. Tam plan eşleşmesi 3 sorudan 0'a düştü, hiçbir soru kazanılmadı. Üstelik plan kurma süresi 0,95 sn'den 5,26 sn'ye çıktı: `ask_batch` bu Laya sürümünde tek forward pass gibi davranmıyor, maliyet seçenek sayısıyla artıyor (KTD6'nın dayandığı varsayım bu ölçümde tutmuyor). Not: bu tek bir ifadeyi ölçer, `Noul` fikrinin tamamını değil — ama gecikme maliyeti ifadeden bağımsız.
 - **Geri çeviri kontrolü zayıf bir ayırıcı.** Doğru planların yarısını reddediyor, yanlışların üçte birini geçiriyor. Onarım adımı bu yüzden az işe yarıyor.
-- **İşlem, filtre ve `HAVING` adımları görece iyi**, ama bu adımların çoğu soruda "yok" cevabı bekleniyor; yüksek oran kısmen bundan geliyor.
-- **`collect` seçeneğine sıra gelmedi.** Yeni `g07` sorusunda ("Her varlık hangi ilişki tiplerini kullanıyor?") Laya işlem adımında `group` yerine `list` seçti; `list` planlarında şekil adımı hiç çalışmadığı için metrik `Choice`'ı — dolayısıyla `collect` seçeneğini — görmedi. Ardından 3 hop'luk anlamsız bir yol kurdu (`RELATED_TO:in`, `RELATED_TO:out`, `EXTENDS:in`), plan güveni 0,17. Yani yeni metrik ölçülebilmiş değil: önündeki işlem adımı tıkalı.
-- **Gecikme ölçümler arasında 3–4 kat oynuyor** (plan 3,8 → 0,88 → 1,24 → 0,95 sn). Kod yolu aynı; fark ölçüm anındaki makine yüküne benziyor, ayrıca araştırılmadı. Mutlak değerden çok sıralama anlamlı: plan kurma yönlendirmenin ~5 katı.
-- **Mimari beklendiği gibi çalışıyor:** bütün geçersiz hamleler yapısal olarak engelleniyor, üretilen her plan geçerli Cypher'a dönüşüyor, boş ve kesilmiş sonuçlar doğru raporlanıyor (245 birim testi).
+- **Filtre ve `HAVING` adımları görece iyi**, ama bu adımların çoğu soruda "yok" cevabı bekleniyor; yüksek oran kısmen bundan geliyor.
+- **`collect` ilk kez seçildi, ama iki soruda da yanlış.** İşlem adımı `g07`'de ("Her varlık hangi ilişki tiplerini kullanıyor?") artık `group` verdiği için metrik `Choice`'ı — dolayısıyla `collect` seçeneğini — ilk kez gördü. Laya `g07`'de yine de `count_distinct`'i seçti; `collect`'i seçtiği iki soruda (`g01`, `g05`) ise altın metrik sayım. Yani seçenek artık ulaşılabilir ve geçerli Cypher üretiyor, ama metrik adımı onu doğru yerde kullanmıyor.
+- **Gecikme ölçümler arasında 3–4 kat oynuyor** (plan 3,8 → 0,88 → 1,24 → 0,95 → 1,05 → 0,82 → 0,86 → 0,99 → 0,67 → 0,86 sn). Kod yolu aynı; fark ölçüm anındaki makine yüküne benziyor, ayrıca araştırılmadı. Mutlak değerden çok sıralama anlamlı: plan kurma yönlendirmenin ~5 katı.
+- **Mimari beklendiği gibi çalışıyor:** bütün geçersiz hamleler yapısal olarak engelleniyor, üretilen her plan geçerli Cypher'a dönüşüyor, boş ve kesilmiş sonuçlar doğru raporlanıyor (301 birim testi).
 
 ### Sonraki denemeler (ölçülmedi)
 
-- Hop adımında `Choice` yerine seçenek başına `Noul` sormak ve ilişki açıklamasını yönle birlikte cümle olarak vermek.
-- İşlem adımını sağlamlaştırmak: `g07`'de `group` yerine `list` seçildiği için metrik `Choice`'ına — dolayısıyla `collect` seçeneğine — hiç sıra gelmiyor.
+- Başlangıç varlığını hariç tutma filtresi: %83,3 (`g03`, `g06`, `t01`, `t04`) — kalan tek adım öbeği.
+- Yönlendirme: `aggregate` recall %37,5 ve yanlış yönlendirme %10. Planlayıcı artık doğru planlar kuruyor, ama router soruların çoğunu bu rotaya hiç sokmuyor; tutmayan tek bayrak hedefi de burada.
+- Metrik adımı: `collect` ile sayım arasındaki seçim iki soruda da yanlış tarafa düştü.
 - Aynı düzenekle Jev backend'ini ölçmek (`DECISION_MODEL_BACKEND=jev`).
 
 ### Kod
@@ -799,6 +900,7 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 | Dosya | İçerik |
 | --- | --- |
 | `graphrag/graph/kuzu_client.py` | `frontier_moves`, `distinct_values`, salt okunur `run_read_query` |
+| `graphrag/graph/relation_schema.py` | İlişki açıklamaları ve ilişkiyi adlandıran sözcükler |
 | `graphrag/retrieval/planner/plan.py`, `render_kuzu.py`, `describe.py` | Tipli plan, Kùzu renderer, İngilizce açıklama |
 | `graphrag/retrieval/planner/candidates.py`, `planner.py` | Aday üretimi ve adım adım planlayıcı |
 | `graphrag/retrieval/planner/executor.py`, `facts.py`, `semantic_filter.py` | Kontrol, onarım, çalıştırma, fact ve şablon cevap, anlamsal filtre |

@@ -52,9 +52,60 @@ def _run(db, model, question, seeds, **kw):
 _THEORY_PROBS = {"General Relativity": 0.9, "Universal Gravitation": 0.85, "Calculus": 0.5}
 
 
+class TestWhichKindIsAsked:
+    """The kind list is cut down to what the question names, before asking."""
+
+    @staticmethod
+    def _plan(db, model, question, seeds, **kw):
+        with _model(model):
+            return GuidedQueryPlanner(db, **kw).plan(question, seeds)
+
+    def _semantic_options(self, model):
+        return next((o for o in model.choice_calls if "none" in o), None)
+
+    def test_a_question_naming_no_kind_is_not_filtered(self, science_graph):
+        model = EntityModel({}, choices=["list", "any:out", "stop"])
+        result = self._plan(science_graph, model, "Tüm varlıkları listele.", ["Isaac Newton"])
+        assert result.semantic is None
+        assert self._semantic_options(model) is None
+        assert next(t for t in result.trace if t.step == "semantic").forced
+        assert model.entity_calls == []
+
+    def test_a_kind_a_hop_guarantees_is_not_asked(self, science_graph):
+        # Every BORN_IN target is a place, so "places" needs no filter.
+        model = EntityModel({}, choices=["count", "stop"])
+        result = self._plan(science_graph, model, "How many places was Isaac Newton born in?",
+                            ["Isaac Newton"], relation_schema=SCHEMA)
+        assert result.semantic is None
+        assert self._semantic_options(model) is None
+
+    def test_a_kind_naming_an_entity_in_the_middle_is_not_asked(self, science_graph):
+        # The work is what the first hop reaches, not what the answer is.
+        model = EntityModel({}, choices=["list", "AUTHORED:out", "RELATED_TO:out"])
+        result = self._plan(science_graph, model, "Newton'un yazdığı eserle ilişkili kavramlar?",
+                            ["Isaac Newton"], relation_schema=SCHEMA, max_hops=2)
+        assert result.semantic is None
+
+    def test_a_zero_hop_plan_takes_the_kind_it_names(self, science_graph):
+        model = EntityModel(_THEORY_PROBS, choices=["count"])
+        result = self._plan(science_graph, model, THEORIES, [])
+        assert result.semantic == "theory"
+        assert next(t for t in result.trace if t.step == "semantic").forced
+
+    def test_a_named_kind_over_hops_is_still_asked(self, science_graph):
+        model = EntityModel({}, choices=["list", "any:out", "stop", "none"])
+        self._plan(science_graph, model, "Which theories is Isaac Newton connected to?",
+                   ["Isaac Newton"], relation_schema=SCHEMA)
+        assert set(self._semantic_options(model)) == {"none", "theory"}
+
+
+SCHEMA = {"BORN_IN": "was born in a place", "AUTHORED": "wrote, published or authored a work",
+          "RELATED_TO": "any other relationship"}
+
+
 class TestCountRange:
     def test_uncertain_candidates_give_a_range(self, science_graph):
-        model = EntityModel(_THEORY_PROBS, choices=["count", "stop", "theory"])
+        model = EntityModel(_THEORY_PROBS, choices=["count", "theory"])
         result = _run(science_graph, model, THEORIES, [])
         assert result.semantic.sure_names == ["General Relativity", "Universal Gravitation"]
         assert result.semantic.uncertain_names == ["Calculus"]
@@ -67,14 +118,14 @@ class TestCountRange:
 
     def test_no_uncertain_candidates_give_a_single_number(self, science_graph):
         probs = {"General Relativity": 0.9, "Universal Gravitation": 0.85}
-        model = EntityModel(probs, choices=["count", "stop", "theory"])
+        model = EntityModel(probs, choices=["count", "theory"])
         result = _run(science_graph, model, THEORIES, [])
         assert result.upper_rows is None
         assert result.answer == "2 recorded in the graph: General Relativity, Universal Gravitation"
         assert "between" not in result.facts[0]["text"]
 
     def test_every_candidate_is_scored_once(self, science_graph):
-        model = EntityModel(_THEORY_PROBS, choices=["count", "stop", "theory"])
+        model = EntityModel(_THEORY_PROBS, choices=["count", "theory"])
         _run(science_graph, model, THEORIES, [])
         assert len(model.entity_calls) == len(set(model.entity_calls)) == 14
 
@@ -87,8 +138,7 @@ class TestGroupedSemanticFilter:
         # Edges into theories, per relation type.
         model = EntityModel(
             _THEORY_PROBS,
-            choices=["group", "any:out", "stop", "count", "theory"],
-            batch={"key:e0.type": 0.9},
+            choices=["any:out", "stop", "theory"],
         )
         result = _run(science_graph, model, "How many relations of each type point to theories?", [])
         assert result.rows == [
@@ -103,12 +153,12 @@ class TestGroupedSemanticFilter:
 
 class TestSkipAndCap:
     def test_candidate_cap_declines_the_plan(self, science_graph):
-        model = EntityModel(_THEORY_PROBS, choices=["count", "stop", "theory"])
+        model = EntityModel(_THEORY_PROBS, choices=["count", "theory"])
         assert _run(science_graph, model, THEORIES, [], max_candidates=5) is None
         assert model.entity_calls == []
 
     def test_no_predicate_leaves_the_plan_unchanged(self, science_graph):
-        model = EntityModel(_THEORY_PROBS, choices=["count", "stop", "none"])
+        model = EntityModel(_THEORY_PROBS, choices=["count", "none"])
         result = _run(science_graph, model, "How many entities are there in the graph?", [])
         assert result.semantic is None and result.upper_rows is None
         assert result.plan.filters == []

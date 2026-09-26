@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any, Callable
 from unittest.mock import patch
 
+from graphrag.graph.relation_schema import RelationSchema, parse_relation_schema
 from graphrag.retrieval.planner.describe import describe_plan
 from graphrag.retrieval.planner.plan import FieldRef, Filter, Having, Hop, Order, QueryPlan, validate_plan
 from graphrag.retrieval.planner.planner import _parse_metric
@@ -129,7 +130,7 @@ def validate_item(item: dict[str, Any]) -> None:
         raise ValueError(f"{item['id']}: a semantic plan needs a known kind and 'members'")
 
 
-def build_graph(db, data: dict[str, Any], data_path: Path = DEFAULT_DATA) -> dict[str, str]:
+def build_graph(db, data: dict[str, Any], data_path: Path = DEFAULT_DATA) -> RelationSchema:
     """Load the question set's graph into *db*; returns the relation schema."""
     source = json.loads((Path(data_path).parent / data["entities_from"]).read_text(encoding="utf-8"))
     db.create_schema()
@@ -139,7 +140,7 @@ def build_graph(db, data: dict[str, Any], data_path: Path = DEFAULT_DATA) -> dic
         db.upsert_edge(s, t, rel_type)
     db.run_pagerank()
     db.run_community_detection()
-    return source.get("schema", {})
+    return parse_relation_schema(source.get("schema", {}))
 
 
 # ── Comparison ───────────────────────────────────────────────────────────────
@@ -284,6 +285,16 @@ def _evaluate_plan(db, item, planner, check, schema) -> dict[str, Any]:
         "plan_ms": plan_ms,
         "plan_description": result.description if result else None,
         "gold_description": describe_spec(item["plan"], schema),
+        # The hops in the same "TYPE:direction" spelling the labelled set uses,
+        # so that a hop failure can be read off the record.
+        "gold_hops": list(item["plan"].get("hops", [])),
+        "plan_hops": [f"{h.rel_type or 'any'}:{h.direction}" for h in actual.hops] if actual else None,
+        "gold_shape": {"keys": list(item["plan"].get("keys", [])),
+                       "metrics": list(item["plan"].get("metrics", []))},
+        "plan_shape": {"keys": [f"{k.var}.{k.field}" for k in actual.keys],
+                       "metrics": [_spell_metric(m) for m in actual.metrics]} if actual else None,
+        "gold_semantic": gold_semantic,
+        "plan_semantic": actual_semantic,
         "steps": steps,
         "exact_plan_match": is_exact(steps, gold, actual),
         "result_match": rows is not None and rows == expected_rows(item),
@@ -294,6 +305,11 @@ def _evaluate_plan(db, item, planner, check, schema) -> dict[str, Any]:
         "check_gold": check(question, describe_spec(item["plan"], schema)),
         "check_wrong": check(question, describe_spec(item["wrong_plan"], schema)),
     }
+
+
+def _spell_metric(metric) -> str:
+    """The metric in the same spelling the labelled set uses ("count_distinct:v1.name")."""
+    return metric.op if metric.ref is None else f"{metric.op}:{metric.ref.var}.{metric.ref.field}"
 
 
 def _rate(values: list[bool]) -> float | None:
@@ -417,17 +433,20 @@ def run_live(data_path: Path = DEFAULT_DATA) -> tuple[list[dict[str, Any]], floa
         validate_item(item)
 
     counter = CountingModel(get_decision_model())
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp,          patch("graphrag.retrieval.router.get_decision_model", return_value=counter),          patch("graphrag.retrieval.planner.planner.get_decision_model", return_value=counter),          patch("graphrag.retrieval.planner.executor.get_decision_model", return_value=counter):
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp, \
+         patch("graphrag.retrieval.router.get_decision_model", return_value=counter), \
+         patch("graphrag.retrieval.planner.planner.get_decision_model", return_value=counter), \
+         patch("graphrag.retrieval.planner.executor.get_decision_model", return_value=counter):
         db = KuzuClient(db_path=str(Path(tmp) / "eval.kuzu"))
         try:
             schema = build_graph(db, data, data_path)
-            planner = GuidedQueryPlanner(db, schema)
+            planner = GuidedQueryPlanner(db, schema.descriptions, schema.words)
             records = evaluate(
                 db, data["items"],
                 router=IntentRouter(),
                 planner=planner,
                 check=AggregateExecutor(db, planner).check,
-                relation_schema=schema,
+                relation_schema=schema.descriptions,
                 route_threshold=settings.aggregate_route_min_confidence,
                 counter=counter,
             )

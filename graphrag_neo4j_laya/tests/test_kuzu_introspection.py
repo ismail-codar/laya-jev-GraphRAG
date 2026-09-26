@@ -98,17 +98,33 @@ class TestRelationSchema:
         path = tmp_path / "data.json"
         path.write_text(json.dumps(science_data), encoding="utf-8")
         schema = load_relation_schema(str(path))
-        assert schema["BORN_IN"] == "was born in a place"
+        assert schema.descriptions["BORN_IN"] == "was born in a place"
 
     def test_accepts_plain_mapping(self, tmp_path):
         from graphrag.graph.relation_schema import load_relation_schema
 
         path = tmp_path / "schema.json"
         path.write_text(json.dumps({"LEADS": "leads an organisation"}), encoding="utf-8")
-        assert load_relation_schema(str(path)) == {"LEADS": "leads an organisation"}
+        assert load_relation_schema(str(path)).descriptions == {"LEADS": "leads an organisation"}
+
+    def test_an_entry_may_carry_the_words_that_name_it(self, tmp_path):
+        from graphrag.graph.relation_schema import load_relation_schema
+
+        path = tmp_path / "schema.json"
+        path.write_text(json.dumps({
+            "AUTHORED": {"description": "wrote a work", "words": ["yazdı", " Yazan "]},
+            "LEADS": {"description": "leads an organisation"},
+            "RELATED_TO": "any other relationship",
+        }, ensure_ascii=False), encoding="utf-8")
+        schema = load_relation_schema(str(path))
+        assert schema.descriptions == {"AUTHORED": "wrote a work",
+                                       "LEADS": "leads an organisation",
+                                       "RELATED_TO": "any other relationship"}
+        # Words are stripped and lowercased; an entry without them carries none.
+        assert schema.words == {"AUTHORED": ("yazdı", "yazan")}
 
     def test_missing_path_returns_empty(self, tmp_path):
         from graphrag.graph.relation_schema import load_relation_schema
 
-        assert load_relation_schema(None) == {}
-        assert load_relation_schema(str(tmp_path / "missing.json")) == {}
+        assert load_relation_schema(None).descriptions == {}
+        assert load_relation_schema(str(tmp_path / "missing.json")).words == {}

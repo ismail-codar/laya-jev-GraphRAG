@@ -1,15 +1,24 @@
 {
   "description": "Small science-history knowledge graph. `triples` are what an LLM extraction step would emit from `documents`: free-text relation strings, each pointing at the chunk it came from. Two of them are deliberately hallucinated; Laya should reject them against their source text.",
   "schema": {
-    "AUTHORED":   "wrote, published or authored a work",
-    "BORN_IN":    "was born in a place",
-    "DEVELOPED":  "formulated, invented or developed an idea, theory or technology",
-    "LEADS":      "was president, head or leader of an organisation",
-    "DISCOVERED": "discovered, detected or first observed something",
-    "PREDICTED":  "predicted or foresaw a phenomenon",
-    "EXTENDS":    "generalises, extends or builds upon another theory",
-    "EXPLAINS":   "explains or describes a phenomenon",
-    "RELATED_TO": "any other relationship"
+    "AUTHORED":   {"description": "wrote, published or authored a work",
+                   "words": ["yazdı", "yazan", "yazar", "yazmış", "yayımla", "yayınla"]},
+    "BORN_IN":    {"description": "was born in a place",
+                   "words": ["doğdu", "doğmuş", "doğum"]},
+    "DEVELOPED":  {"description": "formulated, invented or developed an idea, theory or technology",
+                   "words": ["geliştir", "icat", "formüle"]},
+    "LEADS":      {"description": "was president, head or leader of an organisation",
+                   "words": ["başkan", "lider", "yönet"]},
+    "DISCOVERED": {"description": "discovered, detected or first observed something",
+                   "words": ["keşf", "keşif", "gözlemle", "tespit"]},
+    "PREDICTED":  {"description": "predicted or foresaw a phenomenon",
+                   "words": ["öngör", "tahmin"]},
+    "EXTENDS":    {"description": "generalises, extends or builds upon another theory",
+                   "words": ["genişlet", "genelleştir"]},
+    "EXPLAINS":   {"description": "explains or describes a phenomenon",
+                   "words": ["açıkla", "anlat"]},
+    "RELATED_TO": {"description": "any other relationship",
+                   "words": []}
   },
   "documents": {
     "newton": "Isaac Newton was born in Woolsthorpe, Lincolnshire. In 1687 he wrote Principia Mathematica, which introduced the law of universal gravitation. He came up with calculus at roughly the same time as Gottfried Leibniz, who developed it independently. He later served as president of the Royal Society.",
