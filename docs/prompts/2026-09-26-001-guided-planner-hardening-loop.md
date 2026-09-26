@@ -122,6 +122,7 @@ Kronolojik; her satır bir commit. Ölçümler gerçek Laya, aynı 34 soru.
 | 8 | Anlamsal filtre: yalnız sorunun andığı tür, hop'un ima ettiği düşülerek | anlamsal %70,8 → **%95,8**, sonuç → **%91,7**, tam plan → %75,0 |
 | 9 | Filtre: iki+ hop'ta başlangıç varlığı kodda hariç tutulur | filtre %83,3 → %87,5, tam plan → %79,2 |
 | 10 | Filtre: sayısal filtre yalnız soru PageRank/topluluk anıyorsa (ve `rank` değilse) | filtre → **%95,8**, tam plan → **%87,5**, tr tam plan **%100** |
+| 11 | Anılan ilişki tipi, onu sunabilen ilk hop'ta harcanır (yalnız hop0'da değil) | hop tipi → **%100**, durma → **%100**, filtre → **%100**, sonuç → **%95,8** |
 
 ### Çürütülen varsayımlar — tekrar denemeyin
 
@@ -144,7 +145,9 @@ Kronolojik; her satır bir commit. Ölçümler gerçek Laya, aynı 34 soru.
 - **KTD5:** plan güveni en zayıf adımın olasılığıdır, çarpım değil. Ayırma gücü min %85,2'ye
   karşı çarpım %84,3; doğru plan çıkmaya başlayınca fark ölçülebilir hale geldi.
 - Kod kararına alınan her adım, arkasındaki adımları da düzeltti (işlem düzelince anahtar ve
-  metrik; hop düzelince filtre).
+  metrik; hop düzelince filtre). `t04`'te ikinci hop düzelince model üçüncü hop'u kendiliğinden
+  bıraktı — planlanan "alt sınırı kesin sayı yap" turu gereksiz kaldı. Bir adımın hatası
+  sonrakilerin hatası gibi görünebiliyor: ölçümü hep en erken bozulan adımdan onarın.
 - Adımlar koda geçtikçe soru başına `Choice` 3,9'dan 2,7'ye, plan süresi düştü.
 
 ---
@@ -153,14 +156,12 @@ Kronolojik; her satır bir commit. Ölçümler gerçek Laya, aynı 34 soru.
 
 1. **`t02`** — "the theory Einstein discovered is connected to": anılan tür cevabı değil yolun
    ortasındaki varlığı tarif ediyor; koda bağlanamayan iki anlamsal sorudan biri.
-2. **`t04`** — alt sınır kesin sayı olarak uygulanmadığı için üçüncü bir hop atıyor. "İlişkiye
-   iki atıf = tam iki adım" denenebilir.
-3. **`g02`** — tek kalan yön hatası (`any:in`, altın `any:out`).
-4. **Router** — tutmayan tek bayrak hedefi burada: agregasyon sorularının yalnız %37,5'i bu
+2. **`g02`** — tek kalan yön hatası (`any:in`, altın `any:out`); sonucu değiştirmiyor.
+3. **Router** — tutmayan tek bayrak hedefi burada: agregasyon sorularının yalnız %37,5'i bu
    rotaya giriyor, yanlış yönlendirme %10. Planlayıcı artık doğru plan kuruyor; darboğaz
    yönlendirme.
-5. **Jev backend'ini aynı düzenekle ölçmek** (`DECISION_MODEL_BACKEND=jev`).
-6. **Geri çeviri kontrolü** — doğru planların yarısını reddediyor, yanlışların üçte birini
+4. **Jev backend'ini aynı düzenekle ölçmek** (`DECISION_MODEL_BACKEND=jev`).
+5. **Geri çeviri kontrolü** — doğru planların yarısını reddediyor, yanlışların üçte birini
    geçiriyor (%50 / %66,7). Onarım adımı bu yüzden az işe yarıyor.
 
 ---

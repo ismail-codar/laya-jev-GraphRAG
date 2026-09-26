@@ -172,6 +172,8 @@ class _Planning:
     def hops(self) -> None:
         least, exact = candidates.hops_asked_for(self.question, self.p.relation_schema,
                                                  self.p.relation_words)
+        named = candidates.names_one_relation(self.question, self.p.relation_schema,
+                                              self.p.relation_words)
         for i in range(self.p.max_hops):
             step = f"hop{i}"
             moves = self.p.db.frontier_moves(self.frontier())
@@ -196,17 +198,6 @@ class _Planning:
                     self.forced(step, "stop")
                     return
                 options.pop("stop")
-                # If the question names one relation type and no other, the
-                # first hop is the one its verb describes ("... that Isaac
-                # Newton authored"), so `any` and the other types go. Naming
-                # two says nothing about which comes first, and the words are
-                # read out of the schema's own descriptions, so a schema
-                # written in another language than the question matches
-                # nothing and the model keeps the whole choice.
-                named = candidates.names_one_relation(self.question, self.p.relation_schema,
-                                                      self.p.relation_words)
-                if named:
-                    options = candidates.only_this_relation(options, named)
             elif i < least:
                 # The question asks for a longer path than the plan has
                 # walked. Measured: offered `stop` here, the model took it in
@@ -216,6 +207,24 @@ class _Planning:
                 # It said how many steps, and the plan has taken them.
                 self.forced(step, "stop")
                 return
+            if named:
+                # A question that names one relation type and no other says
+                # which step that type is by where the graph can take it. It
+                # is usually the first ("... that Isaac Newton **authored**"),
+                # but not always: "how many others **developed** something
+                # that Isaac Newton is **connected to**" names the far step,
+                # and Newton has no DEVELOPED relation to take. So the type is
+                # spent on the first hop that offers it, and after that the
+                # question has said all it says about types. Naming two types
+                # says nothing about which comes first, and the words come out
+                # of the schema's own descriptions, so a schema written in
+                # another language than the question matches nothing and the
+                # model keeps the whole choice.
+                narrowed = candidates.only_this_relation(options, named)
+                if narrowed:
+                    if "stop" in options:
+                        narrowed["stop"] = options["stop"]
+                    options, named = narrowed, None
             if i and not candidates.asks_for_the_others(self.question):
                 # Reversing the hop just taken walks back to the entities the
                 # plan came from, so it answers nothing the plan does not

@@ -257,9 +257,8 @@ def the_way_back(hop: Hop) -> str:
 
 
 def only_this_relation(options: dict[str, str], rel_type: str) -> dict[str, str]:
-    """The hop options of *rel_type* alone, or all of them if it has none here."""
-    kept = {key: text for key, text in options.items() if key.split(":")[0] == rel_type}
-    return kept or options
+    """The hop options of *rel_type* alone; empty where the graph offers none."""
+    return {key: text for key, text in options.items() if key.split(":")[0] == rel_type}
 
 
 def mentions_entity(text: str, name: str) -> bool:

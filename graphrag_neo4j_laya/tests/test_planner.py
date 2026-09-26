@@ -198,6 +198,17 @@ class TestStartStep:
 
 
 class TestHopLoop:
+    def test_a_named_type_waits_for_the_hop_that_offers_it(self, science_graph):
+        # The named relation is the far step of the path: Isaac Newton has no
+        # DEVELOPED relation, so the first hop stays open and the second one
+        # is the named type, with nothing left to ask.
+        model = ScriptedModel(choices=["count", "any:out", "stop"])
+        result = _plan(science_graph, model,
+                       "How many others developed something that Isaac Newton is connected to?",
+                       ["Isaac Newton"], max_hops=3)
+        assert result.plan.hops == [Hop(None, "out"), Hop("DEVELOPED", "in")]
+        assert next(t for t in result.trace if t.step == "hop1").forced
+
     def test_an_anchored_plan_is_not_offered_stop_at_hop0(self, science_graph):
         # Stopping before the first hop would return the anchor itself.
         model = ScriptedModel(choices=["count", "DEVELOPED:in"])
