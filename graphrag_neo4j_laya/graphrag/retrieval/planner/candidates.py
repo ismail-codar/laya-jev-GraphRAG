@@ -57,6 +57,24 @@ def asks_per_group(text: str) -> bool:
     return bool(_DISTRIBUTIVE_RE.search(text))
 
 
+# The same wording that makes a question a threshold question also says how
+# the group is compared: "at least 2" is >= 2, "1'den fazla" is > 1.
+_COMPARISONS = (
+    (">=", re.compile(r"at least|en\s+az\s+\d", re.IGNORECASE)),
+    ("<=", re.compile(r"at most|en\s+fazla\s+\d|en\s+çok\s+\d", re.IGNORECASE)),
+    (">", re.compile(r"more than|greater than|\d+['’]?[dt][ae]n\s+(fazla|çok)", re.IGNORECASE)),
+    ("<", re.compile(r"less than|fewer than|\d+['’]?[dt][ae]n\s+az", re.IGNORECASE)),
+)
+
+
+def comparison_from_wording(text: str) -> str | None:
+    """The operator the question's threshold means, if it sets one."""
+    for op, pattern in _COMPARISONS:
+        if pattern.search(text):
+            return op
+    return None
+
+
 def sets_a_threshold(text: str) -> bool:
     """Does the question compare a quantity with a number ("at least 2")?"""
     return bool(_THRESHOLD_RE.search(text))
@@ -254,6 +272,53 @@ def hop_options(plan: QueryPlan, moves: list[dict], relation_schema: dict[str, s
     return options
 
 
+# What the answer is broken down by is a noun in the question: "of each
+# **type**", "her **varlık**". Only three things can be grouped by, so the
+# vocabulary is that small: the relation type, the community, or — for
+# anything else that can be named — the entity itself.
+_FIELD_WORDS = (
+    ("type", re.compile(r"(?<!\w)(types?|kinds?|tür\w*|tip\w*|çeşit\w*)(?!\w)", re.IGNORECASE)),
+    ("communityId", re.compile(r"(?<!\w)(communit(y|ies)|clusters?|topluluk\w*|küme\w*)(?!\w)",
+                               re.IGNORECASE)),
+)
+
+
+def grouped_by(text: str) -> str | None:
+    """
+    The field the question says the answer is broken down by, if it says.
+
+    A distributive marker points straight at it — the noun after "each" or
+    "her" is the group ("Her **varlık** hangi ilişki tiplerini kullanıyor?"
+    groups by entity although it also says "tip"). Without one the whole
+    question is read, which is how a threshold question names its group
+    ("1'den fazla geçen ilişki **türleri**").
+    """
+    after = _DISTRIBUTIVE_RE.search(text)
+    if after:
+        # The noun the marker governs, not the rest of the sentence: "Her
+        # varlık hangi ilişki tiplerini" groups by entity, and reading on
+        # would find "tip" and group by relation type instead.
+        scope = " ".join(re.findall(r"[^\W\d_]+", text[after.end():], re.UNICODE)[:2])
+    else:
+        scope = text
+    for field, pattern in _FIELD_WORDS:
+        if pattern.search(scope):
+            return field
+    return "name" if scope.strip() else None
+
+
+# PageRank is the one number a node carries, and no question asks for its
+# average without saying so.
+_IMPORTANCE_RE = re.compile(
+    r"(?<!\w)(pagerank|importance|important|influen\w*|central\w*|"
+    r"önem\w*|etkili|merkez\w*)(?!\w)", re.IGNORECASE)
+
+
+def asks_about_importance(text: str) -> bool:
+    """Does the question ask about how important an entity is?"""
+    return bool(_IMPORTANCE_RE.search(text))
+
+
 def node_vars(plan: QueryPlan) -> list[str]:
     return [f"v{i}" for i in range(len(plan.hops) + 1)]
 
@@ -271,6 +336,35 @@ def group_key_candidates(plan: QueryPlan) -> list[tuple[str, str]]:
 
 def numeric_field_candidates(plan: QueryPlan) -> list[tuple[str, str]]:
     return [(v, f) for v in node_vars(plan) for f in NODE_FIELDS if f != "name"]
+
+
+_DISTINCT_RE = re.compile(r"(?<!\w)(distinct|different|unique|farklı|ayrı|değişik)(?!\w)",
+                          re.IGNORECASE)
+_WHICH_RE = re.compile(r"(?<!\w)(which|what|hangi\w*)(?!\w)", re.IGNORECASE)
+
+
+def metric_from_wording(text: str, plan: QueryPlan, key_field: str | None) -> str | None:
+    """
+    The metric the question asks for, when it says what it is counting.
+
+    A question that asks how many, compares a group with a number, or ranks
+    the groups wants a count — of distinct entities if it says "distinct", of
+    matches otherwise. Asked instead, the model answered `count_distinct` to
+    every grouped question of the labelled set, right or wrong. A question
+    that asks *which* relation types, grouped by something else, wants the
+    types themselves listed per group. Anything else is left to the model,
+    and so is every question that asks about importance, where the PageRank
+    aggregates are the point.
+    """
+    if asks_about_importance(text):
+        return None
+    if asks_for_a_number(text) or sets_a_threshold(text) or plan.operation == "rank":
+        return f"count_distinct:{plan.target}.name" if _DISTINCT_RE.search(text) else "count"
+    edges = edge_vars(plan)
+    if (plan.operation == "group" and key_field != "type" and edges
+            and _WHICH_RE.search(text) and _FIELD_WORDS[0][1].search(text)):
+        return f"collect:{edges[0]}.type"
+    return None
 
 
 def small_limit(numbers: list[int | float], default: int = 5, maximum: int = 50) -> int:

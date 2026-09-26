@@ -255,27 +255,42 @@ class _Planning:
     def shape(self, numbers: list[int | float]) -> None:
         if self.plan.operation not in ("group", "rank"):
             return
+        # Asked one by one, every key came back yes: on the labelled set the
+        # per-key probabilities sat between 0.75 and 0.96 whether the key was
+        # the right one or not, and five-key groups came out of questions
+        # whose answer has one. So the field is read from the question and
+        # the model picks which entity's field it is, as a single Choice.
         keys = candidates.group_key_candidates(self.plan)
-        questions = {
-            f"key:{v}.{f}": {"type": "noul", "instruction": f"Should the answer be broken down per {_key_words(v, f)}?"}
-            for v, f in keys
-        }
-        answers = self.model.ask_batch(self.context(), questions)
-        probs = {name: answers[name].score for name in questions}
-        kept = [name for name, p in probs.items() if p >= _KEEP_THRESHOLD] or [max(probs, key=probs.get)]
-        for name in kept:
-            self.trace.append(StepTrace(name, ["yes", "no"], "yes", max(probs[name], 1 - probs[name])))
-            v, f = name[4:].split(".")
-            self.plan.keys.append(FieldRef(v, f))
+        field = candidates.grouped_by(self.question)
+        keys = [(v, f) for v, f in keys if f == field] or keys
+        if field == "name" and len(self.plan.hops) == 1:
+            # On a one-hop plan, grouping by the far end is the same question
+            # asked with the hop reversed, and the direction has already been
+            # read from the wording. Measured: offered both ends, the model
+            # took the far one every time, and no labelled answer wants it.
+            keys = [(v, f) for v, f in keys if v == "v0"] or keys
+        options = {f"{v}.{f}": _key_words(v, f, self.plan) for v, f in keys}
+        chosen = (self.forced("key", next(iter(options))) if len(options) == 1
+                  else self.choose("key", "What is the answer broken down by?", options))
+        self.plan.keys.append(FieldRef(*chosen.split(".")))
 
-        metric = _parse_metric(self.choose("metric", "What should be computed for each group?",
-                                           _metric_options(self.plan)))
+        said = candidates.metric_from_wording(self.question, self.plan, field)
+        metric = _parse_metric(
+            self.forced("metric", said) if said
+            else self.choose("metric", "What should be computed for each group?",
+                             _metric_options(self.plan, self.question)))
         self.plan.metrics.append(metric)
         if self.plan.operation == "rank":
             self.plan.order = [Order(metric, descending=True)]
             self.plan.limit = candidates.small_limit(numbers)
         elif metric.op in LIST_METRIC_OPS:
             pass  # a list of values cannot be compared with a number
+        elif numbers and (said_op := candidates.comparison_from_wording(self.question)):
+            # "at least 2" is the HAVING, operator and all: asking whether to
+            # add one, and which way it compares, asks the question twice.
+            self.forced("having", "yes")
+            self.forced("having_op", said_op)
+            self.plan.having.append(Having(metric, said_op, self._number("having_value", numbers)))
         elif numbers and self.yes("having", _HAVING_INSTRUCTION):
             op = self.choose("having_op", "How is the group value compared with the number?", _COMPARISON_OPTIONS)
             self.plan.having.append(Having(metric, op, self._number("having_value", numbers)))
@@ -293,26 +308,54 @@ class _Planning:
         return numbers[list(options).index(self.choose(step, "Which number from the question is meant?", options))]
 
 
-def _key_words(var: str, fld: str) -> str:
+def _key_words(var: str, fld: str, plan: QueryPlan) -> str:
     if var.startswith("e"):
         return f"relation type of step {int(var[1:]) + 1}"
-    who = "start entity" if var == "v0" else f"step-{var[1:]} entity"
-    return f"{'community' if fld == 'communityId' else 'name'} of the {who}"
+    return f"{'community' if fld == 'communityId' else 'name'} of {_which_entity(var, plan)}"
 
 
-def _metric_options(plan: QueryPlan) -> dict[str, str]:
+def _which_entity(var: str, plan: QueryPlan) -> str:
+    """
+    Which entity of the path *var* is, in words.
+
+    "the start entity" only means something when the plan starts somewhere:
+    for a plan over the whole graph, v0 is every entity the first relation
+    leaves from (or arrives at, if that relation is walked backwards).
+    """
+    step = int(var[1:])
+    if step:
+        return f"the step-{step} entity, at the far end of the path"
+    if plan.start:
+        return f"the entity the query starts at ({plan.start})"
+    if plan.hops:
+        arrow = "leaves from" if plan.hops[0].direction == "out" else "arrives at"
+        return f"the entity each step-1 relation {arrow}"
+    return "the entity"
+
+
+def _metric_options(plan: QueryPlan, question: str = "") -> dict[str, str]:
     target = plan.target
     options = {
         "count": "the number of matching paths or edges",
         f"count_distinct:{target}.name": "the number of distinct entities reached",
     }
+    # PageRank is the only number a node carries, and a question that wants
+    # its average says so. Measured: offered unasked, it was chosen for four
+    # questions that ask how many relations a group has.
     words = {"sum": "total", "avg": "average", "min": "lowest", "max": "highest"}
-    for v in candidates.node_vars(plan):
-        who = "start entity" if v == "v0" else f"step-{v[1:]} entity"
-        for op, word in words.items():
-            options[f"{op}:{v}.pagerank"] = f"the {word} PageRank (importance) of the {who}"
-    # A list cannot be ordered, so `collect` is offered to group plans only.
-    if plan.operation != "rank":
+    if candidates.asks_about_importance(question):
+        for v in candidates.node_vars(plan):
+            for op, word in words.items():
+                options[f"{op}:{v}.pagerank"] = (
+                    f"the {word} PageRank (importance) of {_which_entity(v, plan)}")
+    # A list cannot be ordered, compared with a number, or read as a count,
+    # so `collect` is offered only where the answer may be a list: not to a
+    # `rank`, not to a question asking how many, and not to one that compares
+    # the group with a number.
+    lists_allowed = (plan.operation != "rank"
+                     and not candidates.asks_for_a_number(question)
+                     and not candidates.sets_a_threshold(question))
+    if lists_allowed:
         for e in candidates.edge_vars(plan):
             step = int(e[1:]) + 1
             options[f"collect:{e}.type"] = (

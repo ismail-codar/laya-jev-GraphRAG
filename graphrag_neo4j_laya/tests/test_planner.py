@@ -14,7 +14,7 @@ import pytest
 
 from graphrag.retrieval.planner import candidates
 from graphrag.retrieval.planner.candidates import extract_numbers
-from graphrag.retrieval.planner.plan import FieldRef, Filter, Hop, Metric
+from graphrag.retrieval.planner.plan import FieldRef, Filter, Having, Hop, Metric
 from graphrag.retrieval.planner.planner import GuidedQueryPlanner
 from tests.scripted_model import ScriptedModel
 
@@ -36,14 +36,15 @@ class TestAcceptancePlans:
         assert set(model.choice_calls[1]) == {"DEVELOPED:in", "BORN_IN:in", "any:in"}
 
     def test_ae2_group_by_relation_type(self, science_graph):
-        model = ScriptedModel(choices=["any:out", "stop", "count"],
-                              batch={"key:e0.type": 0.9})
+        model = ScriptedModel(choices=["any:out", "stop"])
         result = _plan(science_graph, model, "Her ilişki tipinde kaç kenar var?", ["Calculus"])
         assert result.plan.start is None
         assert result.plan.hops == [Hop(None, "out")]
         assert result.plan.keys == [FieldRef("e0", "type")]
         assert result.plan.metrics == [Metric("count")]
-        assert model.batch_calls == 1
+        # "Her ilişki tipinde" names the field, and one step has one relation
+        # variable, so there is nothing left to ask.
+        assert next(t for t in result.trace if t.step == "key").forced
 
     def test_ae3_two_hops_excluding_start(self, science_graph):
         model = ScriptedModel(choices=["list", "BORN_IN:out", "BORN_IN:in", "stop"], nouls=[0.9])
@@ -68,7 +69,7 @@ class TestOperationStep:
         "Isaac Newton'un her ilişki türünden kaç farklı hedefi var?",
     ])
     def test_a_distributive_question_is_a_group(self, science_graph, question):
-        model = ScriptedModel(choices=["any:out", "stop", "count"], batch={"key:e0.type": 0.9})
+        model = ScriptedModel(choices=["any:out", "stop"])
         result = _plan(science_graph, model, question, [])
         assert result.plan.operation == "group"
         assert next(t for t in result.trace if t.step == "operation").forced
@@ -84,13 +85,12 @@ class TestOperationStep:
 
     def test_a_superlative_wins_over_a_distributive_marker(self, science_graph):
         # "the most per type" is still a ranking, so the Choice decides.
-        model = ScriptedModel(choices=["rank", "any:out", "stop", "count"],
-                              nouls=[0.1], batch={"key:e0.type": 0.9})
+        model = ScriptedModel(choices=["rank", "any:out", "stop"], nouls=[0.1])
         result = _plan(science_graph, model, "Which type has the most edges of each kind?", [])
         assert result.plan.operation == "rank"
 
     def test_rank_needs_a_superlative(self, science_graph):
-        model = ScriptedModel(choices=["group", "any:out", "stop", "count"], batch={"key:v0.name": 0.9})
+        model = ScriptedModel(choices=["group", "any:out", "stop", "count"])
         _plan(science_graph, model, "Which entities have 2 outgoing relations?", [])
         assert "rank" not in self._offered(model)
 
@@ -100,7 +100,7 @@ class TestOperationStep:
     ])
     def test_a_superlative_keeps_rank(self, science_graph, question):
         model = ScriptedModel(choices=["rank", "any:out", "stop", "count"],
-                              nouls=[0.1], batch={"key:v0.name": 0.9})
+                              nouls=[0.1])
         _plan(science_graph, model, question, [])
         assert "rank" in self._offered(model)
 
@@ -111,7 +111,7 @@ class TestOperationStep:
         "En az 2 ilişkisi olan varlıklar hangileri?",
     ])
     def test_a_threshold_question_is_a_group(self, science_graph, question):
-        model = ScriptedModel(choices=["any:out", "stop", "count"], batch={"key:v0.name": 0.9})
+        model = ScriptedModel(choices=["any:out", "stop"])
         result = _plan(science_graph, model, question, [])
         assert result.plan.operation == "group"
         assert next(t for t in result.trace if t.step == "operation").forced
@@ -378,7 +378,7 @@ class TestHopLoop:
 class TestFiltersAndShape:
     def test_numeric_filter_uses_numbers_from_question(self, science_graph):
         model = ScriptedModel(choices=["group", "any:out", "stop", "v1.pagerank", ">", "count"],
-                              nouls=[0.9], batch={"key:e0.type": 0.9})
+                              nouls=[0.9])
         result = _plan(science_graph, model, "PageRank'ı 0,1'den büyük hedeflere giden kenarlar, tipe göre", [])
         assert result.plan.filters == [Filter(FieldRef("v1", "pagerank"), ">", 0.1)]
 
@@ -389,17 +389,56 @@ class TestFiltersAndShape:
         assert not any(t.step.startswith("filter") for t in result.trace)
 
     def test_rank_uses_small_number_as_limit(self, science_graph):
-        model = ScriptedModel(choices=["rank", "any:out", "stop", "count"],
-                              nouls=[0.1], batch={"key:v0.name": 0.9})
+        model = ScriptedModel(choices=["rank", "any:out", "stop"], nouls=[0.1])
         result = _plan(science_graph, model, "En çok bağlantısı olan 3 varlık hangisi?", [])
         assert result.plan.limit == 3
         assert result.plan.keys == [FieldRef("v0", "name")]
 
-    def test_at_least_one_key_is_kept(self, science_graph):
-        model = ScriptedModel(choices=["group", "any:out", "stop", "count"],
-                              batch={"key:e0.type": 0.3, "key:v0.name": 0.2})
-        result = _plan(science_graph, model, "ilişkiler neye göre gruplandı?", [])
+    def test_the_key_is_the_field_the_question_names(self, science_graph):
+        model = ScriptedModel(choices=["any:out", "stop"])
+        result = _plan(science_graph, model, "Her ilişki tipinden kaç tane var?", [])
         assert result.plan.keys == [FieldRef("e0", "type")]
+
+    def test_one_hop_groups_by_the_near_end(self, science_graph):
+        # Grouping by the far end of a single hop is the same question with
+        # the hop reversed, and the direction is already decided.
+        model = ScriptedModel(choices=["group", "any:out", "stop", "count"])
+        result = _plan(science_graph, model, "ilişkiler neye göre gruplandı?", [])
+        assert result.plan.keys == [FieldRef("v0", "name")]
+        assert next(t for t in result.trace if t.step == "key").forced
+
+    def test_a_longer_path_leaves_the_end_to_the_model(self, science_graph):
+        model = ScriptedModel(choices=["group", "any:out", "any:out", "v2.name", "count"])
+        result = _plan(science_graph, model, "ilişkiler neye göre gruplandı?", [], max_hops=2)
+        assert result.plan.keys == [FieldRef("v2", "name")]
+        assert set(model.choice_calls[3]) == {"v0.name", "v1.name", "v2.name"}
+
+    def test_exactly_one_key_is_chosen(self, science_graph):
+        model = ScriptedModel(choices=["group", "any:out", "stop", "count"])
+        result = _plan(science_graph, model, "ilişkiler neye göre gruplandı?", [])
+        assert len(result.plan.keys) == 1
+
+
+    def test_a_threshold_is_the_having_operator_and_all(self, science_graph):
+        model = ScriptedModel(choices=["any:out", "stop"])
+        result = _plan(science_graph, model, "En az 2 ilişkisi olan varlıklar hangileri?", [])
+        assert result.plan.having == [Having(Metric("count"), ">=", 2)]
+        assert all(t.forced for t in result.trace if t.step.startswith("having"))
+
+    @pytest.mark.parametrize("question, op", [
+        ("Which entities have at least 2 relations?", ">="),
+        ("Which entities have at most 2 relations?", "<="),
+        ("Which types occur more than 1 time?", ">"),
+        ("Which types occur less than 3 times?", "<"),
+        ("Graph'ta 1'den fazla geçen ilişki türleri?", ">"),
+        ("2'den az ilişkisi olan varlıklar?", "<"),
+    ])
+    def test_the_comparison_is_read_from_the_wording(self, science_graph, question, op):
+        assert candidates.comparison_from_wording(question) == op
+
+    def test_a_number_without_a_threshold_still_asks(self, science_graph):
+        # "3 varlık" is a limit, not a comparison, so nothing is forced.
+        assert candidates.comparison_from_wording("En çok bağlantısı olan 3 varlık hangisi?") is None
 
 
 class TestCollectMetric:
@@ -410,30 +449,30 @@ class TestCollectMetric:
         return next(o for o in model.choice_calls if "count" in o and any(k.startswith("count_distinct") for k in o))
 
     def test_group_can_collect_the_relation_types(self, science_graph):
-        model = ScriptedModel(choices=["group", "any:out", "stop", "collect:e0.type"],
-                              batch={"key:v0.name": 0.9})
+        model = ScriptedModel(choices=["group", "any:out", "stop", "collect:e0.type"])
         result = _plan(science_graph, model, "Kim hangi tür ilişkiler kurmuş?", [])
         assert result.plan.metrics == [Metric("collect", FieldRef("e0", "type"))]
         assert "list of every relation type" in result.description
 
     def test_every_step_can_be_collected(self, science_graph):
-        model = ScriptedModel(choices=["group", "any:out", "any:out", "collect:e1.type"],
-                              batch={"key:v0.name": 0.9})
+        model = ScriptedModel(choices=["group", "any:out", "any:out", "v0.name", "collect:e1.type"])
         result = _plan(science_graph, model, "ilişkiler nereye gidiyor?", [], max_hops=2)
         assert result.plan.metrics == [Metric("collect", FieldRef("e1", "type"))]
         assert {"collect:e0.type", "collect:e1.type"} <= set(self._metric_options(model))
 
     def test_rank_is_never_offered_collect(self, science_graph):
-        # A list cannot be ordered, so ranking by it would make the plan invalid.
-        model = ScriptedModel(choices=["rank", "any:out", "stop", "count"],
-                              nouls=[0.1], batch={"key:v0.name": 0.9})
-        _plan(science_graph, model, "En çok bağlantısı olan 3 varlık hangisi?", [])
+        # A list cannot be ordered, so ranking by it would make the plan
+        # invalid. The metric is a Choice here because the question asks
+        # about importance.
+        model = ScriptedModel(choices=["rank", "any:out", "stop", "max:v0.pagerank"],
+                              nouls=[0.1])
+        _plan(science_graph, model, "PageRank'ı en yüksek 3 varlık hangisi?", [])
         assert not any(k.startswith("collect:") for k in self._metric_options(model))
 
     def test_a_collected_list_is_never_compared_with_a_number(self, science_graph):
         # The question holds a number, so `having` would normally be asked.
         model = ScriptedModel(choices=["group", "any:out", "stop", "collect:e0.type"],
-                              nouls=[0.1], batch={"key:v0.name": 0.9})
+                              nouls=[0.1])
         result = _plan(science_graph, model, "2 ve üzeri ilişki kuranlar hangi türlerde?", [])
         assert result.plan.having == []
         assert not any(t.step.startswith("having") for t in result.trace)

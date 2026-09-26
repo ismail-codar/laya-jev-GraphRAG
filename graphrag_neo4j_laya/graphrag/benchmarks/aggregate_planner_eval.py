@@ -287,6 +287,10 @@ def _evaluate_plan(db, item, planner, check, schema) -> dict[str, Any]:
         # so that a hop failure can be read off the record.
         "gold_hops": list(item["plan"].get("hops", [])),
         "plan_hops": [f"{h.rel_type or 'any'}:{h.direction}" for h in actual.hops] if actual else None,
+        "gold_shape": {"keys": list(item["plan"].get("keys", [])),
+                       "metrics": list(item["plan"].get("metrics", []))},
+        "plan_shape": {"keys": [f"{k.var}.{k.field}" for k in actual.keys],
+                       "metrics": [_spell_metric(m) for m in actual.metrics]} if actual else None,
         "steps": steps,
         "exact_plan_match": is_exact(steps, gold, actual),
         "result_match": actual is not None and result_rows(db, actual) == expected_rows(item),
@@ -295,6 +299,11 @@ def _evaluate_plan(db, item, planner, check, schema) -> dict[str, Any]:
         "check_gold": check(question, describe_spec(item["plan"], schema)),
         "check_wrong": check(question, describe_spec(item["wrong_plan"], schema)),
     }
+
+
+def _spell_metric(metric) -> str:
+    """The metric in the same spelling the labelled set uses ("count_distinct:v1.name")."""
+    return metric.op if metric.ref is None else f"{metric.op}:{metric.ref.var}.{metric.ref.field}"
 
 
 def _rate(values: list[bool]) -> float | None:

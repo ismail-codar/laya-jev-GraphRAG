@@ -87,8 +87,7 @@ class TestGroupedSemanticFilter:
         # Edges into theories, per relation type.
         model = EntityModel(
             _THEORY_PROBS,
-            choices=["any:out", "stop", "count", "theory"],
-            batch={"key:e0.type": 0.9},
+            choices=["any:out", "stop", "theory"],
         )
         result = _run(science_graph, model, "How many relations of each type point to theories?", [])
         assert result.rows == [
