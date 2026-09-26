@@ -152,6 +152,42 @@ def mentions_a_relation(
     return bool(named_relations(text, relation_schema or {}, relation_words))
 
 
+# "exactly two steps away", "iki adım ötede": the question says how long the
+# path is, which is the only wording that gives the hop count outright.
+_STEP_COUNT_RE = re.compile(
+    r"(?<!\w)(?P<count>\d+|two|three|iki|üç)\s+(steps?|hops?|adım\w*)(?!\w)",
+    re.IGNORECASE,
+)
+_STEP_WORDS = {"two": 2, "iki": 2, "three": 3, "üç": 3}
+
+
+def hops_asked_for(
+    text: str,
+    relation_schema: dict[str, str] | None = None,
+    relation_words: dict[str, tuple[str, ...]] | None = None,
+) -> tuple[int, bool]:
+    """
+    How many hops the question asks for: (the fewest, whether it says exactly).
+
+    Two readings give a path longer than one step. The question can say so —
+    "exactly two steps away" — and then the count is exact. Or it can refer to
+    a relation twice, once by naming a type and once in passing ("everything
+    that the theory Einstein *discovered* is *connected to*"): the named one
+    describes the entity in the middle, so there is a step on either side of
+    it. That reading gives a lower bound, not a count.
+    """
+    stated = _STEP_COUNT_RE.search(text)
+    if stated:
+        raw = stated.group("count").lower()
+        count = int(raw) if raw.isdigit() else _STEP_WORDS[raw]
+        if count >= 1:
+            return count, True
+    references = len(named_relations(text, relation_schema or {}, relation_words))
+    if _RELATION_WORD_RE.search(text):
+        references += 1
+    return (2, False) if references >= 2 else (1, False)
+
+
 def only_this_relation(options: dict[str, str], rel_type: str) -> dict[str, str]:
     """The hop options of *rel_type* alone, or all of them if it has none here."""
     kept = {key: text for key, text in options.items() if key.split(":")[0] == rel_type}

@@ -747,6 +747,12 @@ Yöntem 1–3'teki sabit şablonlar yerine sorguyu **adım adım** kurar. Her ad
      `any` ve diğer tipler seçeneklerden çıkar, yön modele kalır. İki tip birden anılıyorsa
      hangisinin önce geldiği belli değildir, seçenekler olduğu gibi kalır.
 
+   Sonraki hop'larda tek kural yolun uzunluğu: soru kaç adım istediğini söylüyorsa ("exactly two
+   steps away", "3 adım uzaklıkta") o sayıya varana dek `stop` sunulmaz, varınca zorlanır. Soru
+   ilişkiye iki kez atıfta bulunuyorsa — biri tipi adıyla, biri geçerken ("everything that the
+   theory Einstein **discovered** is **connected to**") — adı geçen ilişki ortadaki varlığı
+   tarif ediyordur, yani onun iki yanında birer adım vardır; bu bir alt sınır, kesin sayı değil.
+
    Bir tipin adı iki yerden okunur. Birincisi şemanın kendi açıklaması: açıklama bir eylem öbeği
    olduğu için ("wrote, published or authored a work") nesnesinden önceki sözcükler o ilişkinin
    adıdır. Nesneyi de saysaydık "list every place in the graph" BORN_IN sorusu olurdu ("was born
@@ -787,27 +793,26 @@ Yöntem 1–5'in yapamadığı çok adımlı yol filtreleri de bu yolla ifade ed
 
 Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `examples/data/aggregate_eval.json`, 34 soru: 10 basit, 7 gruplu / filtreli, 4 iki hop'lu, 3 anlamsal filtreli agregasyon, ve 10 agregasyon olmayan soru; 14'ü Türkçe. Seed'ler setten gelir, yani seed seçim hataları sayılara karışmaz. Laya `multilingual` checkpoint, CPU, 2026-09-25.
 
-> Aşağıdaki tablo hop adımı sağlamlaştırıldıktan **ve** şemaya Türkçe ilişki sözcükleri
-> eklendikten sonraki ölçüm. Parantezdeki değerler, hop kurallarının konduğu ama şemanın hâlâ
-> yalnız İngilizce olduğu bir önceki ölçüm — yani parantezler sözcük listelerinin tek başına
-> etkisini gösteriyor.
+> Aşağıdaki tablo yol uzunluğu kuralı da konduktan sonraki ölçüm. Parantezdeki değerler bir
+> önceki ölçüm — ilk hop kuralları ve Türkçe şema sözcükleri vardı, ama sonraki hop'lar tümüyle
+> modele bırakılmıştı.
 
 | Ölçüm | Sonuç | Bayrak hedefi |
 | --- | --- | --- |
 | İşlem doğruluğu | %100 — kod + `Choice` | |
 | Başlangıç doğruluğu | %100 — kod kararı | |
-| Hop tipi / yön / durma | **%79,2** / %75,0 / %79,2 (önce %75,0 / %75,0 / %79,2) | yön ≥ %90 |
-| Filtre / anahtar / metrik / `HAVING` | %75,0 / %75,0 / %83,3 / %91,7 (değişmedi) | |
+| Hop tipi / yön / durma | **%83,3 / %79,2 / %91,7** (önce %79,2 / %75,0 / %79,2) | yön ≥ %90 |
+| Filtre / anahtar / metrik / `HAVING` | **%83,3** / %75,0 / %83,3 / %91,7 (filtre önce %75,0) | |
 | Anlamsal filtre adımı | %70,8 (değişmedi) | |
-| Tam plan eşleşmesi | **%29,2** (7 / 24 — önce %25,0) | |
-| Sonuç eşleşmesi | **%33,3** (8 / 24 — önce %25,0) | ≥ %80 |
+| Tam plan eşleşmesi | %29,2 (7 / 24 — değişmedi) | |
+| Sonuç eşleşmesi | **%37,5** (9 / 24 — önce %33,3) | ≥ %80 |
 | Agregasyon sorusunu `aggregate`'e yönlendirme | %37,5 (değişmedi) | |
 | Yanlış yönlendirme (agregasyon olmayan → `aggregate`) | %10 (1 / 10) | %0 |
 | Geri çeviri kontrolü: doğru planı geçirme / yanlış planı reddetme | %50,0 / %66,7 (değişmedi) | |
-| Min ve çarpım güveninin ayırma gücü | min %82,4 · çarpım %81,5 (önce %78,7 · %76,9) | |
-| Dil kırılımı (tam plan · sonuç) | en %28,6 · %28,6 — tr **%30,0 · %40,0** (önce tr %20,0 · %20,0) | |
-| Gecikme (ortalama) | yönlendirme 0,17 sn · plan 0,86 sn | |
-| Soru başına çağrı | 3,6 `Choice` · 1,5 `Noul` · 0,2 `ask_batch` | |
+| Min ve çarpım güveninin ayırma gücü | min %75,6 · çarpım %76,5 (önce %82,4 · %81,5) | |
+| Dil kırılımı (tam plan · sonuç) | en %28,6 · **%35,7** — tr %30,0 · %40,0 | |
+| Gecikme (ortalama) | yönlendirme 0,27 sn · plan 1,58 sn | |
+| Soru başına çağrı | 3,7 `Choice` · 1,6 `Noul` · 0,2 `ask_batch` | |
 
 Üç bayrak hedefinin üçü de tutmadı. Router rotası kapalı kalır.
 
@@ -823,7 +828,9 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 - **Soru tek bir ilişki tipini anıyorsa ilk hop odur: hop tipi %66,7 → %75,0.** `any:out` modelin varsayılan cevabı gibi davranıyordu; soru ilişkiyi adıyla andığında bile onu seçiyordu (`s02` "born in", `s06` "authored"). Tipi anan soruda `any` ve diğer tipler seçeneklerden çıkarılınca `s02`, `s06`, `s07` ve `t02`'nin ilk hop'u düzeldi; `s02` ilk kez uçtan uca doğru. Yön modele bırakıldı, çünkü aynı tip iki yönde de bulunabiliyor.
 - **İlişkinin adı şemanın kendi açıklamasından çıkıyor, elle yazılmıyor.** Açıklamalar eylem öbeği ("wrote, published or authored a work"), dolayısıyla nesnesinden önceki sözcükler ilişkinin adıdır: `AUTHORED` → wrote/published/authored, `BORN_IN` → born, `RELATED_TO` → hiçbiri ("any other relationship"). Nesne de sayılsaydı "list every place in the graph" BORN_IN sorusu olurdu. Etiketli setin 24 agregasyon sorusundan beşi tek bir tip anıyor ve dördünde altın ilk hop tam o tip; beşincisi `t04`, orada anılan tip ikinci hop'a ait — ama `t04`'ün hop'ları zaten baştan sona yanlış olduğu için ölçüm kaybı yok.
 - **Şema ilişki sözcüklerini taşıyınca Türkçe de kapandı: hop tipi %75,0 → %79,2, sonuç %25,0 → %33,3.** Açıklamalar İngilizce olduğu için "kaç eser **yazdı**", "kaç şey **keşfedilmiş**", "**yazdığı** eserle" hiçbir tipi anmıyordu — model değil, veri eksiğiydi. Şema girdisi artık açıklamanın yanında o ilişkiyi adlandıran sözcükleri de taşıyabiliyor; sözcük sorudaki sözcüğün başında aranıyor, böylece Türkçe ekler tek bir kökle karşılanıyor ("yazdı" → "yazdığı"). Sözcükler ilişkinin anlamından yazıldı, sorulardan değil — ve `doğdu`/`doğum` yerine `doğ` yazılsaydı "doğrudan bağlı olduğu varlıklar" (`s08`) BORN_IN sorusu olurdu. Etiketli setin sekiz sorusu artık bir tip anıyor, yedisinde altın ilk hop tam o tip. Türkçe tam plan %20,0 → %30,0, Türkçe sonuç %20,0 → %40,0; hiçbir soru gerilemedi.
-- **Kalan hop hataları tek öbekte toplandı.** İki hop'lu dört sorunun dördü de ilk hop'tan sonra duruyor (`t01`, `t02`, `t03`, `t04`) — üçünün ilk hop'u artık doğru, eksik olan yalnız ikinci adım. İç cümlenin ikinci bir hop gerektirdiğini görmek ifadeden okunabilir bir şey değil; tek açık işaret `t01`'in "two steps away"i. Bunun dışında `g02`'de yön ters, `s05` ise doğru ilk hop'tan sonra fazladan bir hop atıyor (sonucu yine de tutuyor, ama plan yanlış).
+- **Yolun uzunluğu da ifadeden okunuyor: durma %79,2 → %91,7.** İki hop'lu dört sorunun dördü de ilk hop'tan sonra duruyordu. İki okuma ikinci adımı veriyor: soru kaç adım olduğunu söyleyebilir ("exactly two steps away" — kesin sayı), ya da ilişkiye iki kez atıfta bulunabilir, biri tipi adıyla biri geçerken ("everything that the theory Einstein **discovered** is **connected to**") — adı geçen ilişki ortadaki varlığı tarif ettiği için onun iki yanında birer adım vardır. İkincisi alt sınır olarak uygulanıyor. Etiketli setin 24 sorusunun tam dördünde iki adım isteniyor ve o dördü tam olarak altın planı iki hop'lu olanlar; hiçbir soruda fazla adım istenmiyor.
+- **`t01` uçtan uca düzeldi**, `t02`/`t03` ikinci adımı artık atıyor ama **geldiği yoldan geri dönüyor**: `DISCOVERED:out` sonrası `DISCOVERED:in`, `AUTHORED:out` sonrası `AUTHORED:in`. Aynı tipin tersi, planın az önce bulunduğu varlıklara geri götürüyor. `t04` ise üçüncü bir hop atıyor (alt sınır kesin sayı olarak uygulanmadığı için). Filtre adımı bu sorularda devreye girdiği için %75,0 → %83,3, sonuç eşleşmesi %33,3 → %37,5.
+- **Kalan hop hataları:** `t02`, `t03`, `t04` (ikinci hop'un tipi), `g02` (yön ters) ve `s05` (doğru ilk hop'tan sonra fazladan bir hop — sonucu yine de tutuyor, ama plan yanlış).
 - **Zorlanan adım arttıkça güven ayırma gücü düştü** (min %93,8 → %78,7). Kalan `Choice`'lar tam da belirsiz olanlar; kodun aldığı adımlar 1,0 olasılıkla kayda geçtiği için güvene karışmıyor. Aynı sebeple soru başına `Choice` 3,7'den 3,6'ya, plan süresi 1,05 sn'den 0,82 sn'ye indi.
 - **Hop düzelince şekil adımı zorlaştı.** Anahtar %87,5 → %75,0, filtre %83,3 → %75,0: daha önce sıfır hop'ta kalan sorular artık bir hop attığı için gruplama anahtarı adayları çoğaldı ve model yanılıyor. Anlamsal filtre de %75,0 → %70,8 (`s06` artık gereksiz bir filtre ekliyor). Yine de tam plan %16,7 → %25,0 ve sonuç %20,8 → %25,0: artık sonuç isabetlerinin **altısı da** tam doğru plandan geliyor.
 - **KTD5 doğrulandı.** Doğru plan çıkmaya başlayınca güven ayırma gücü ilk kez ölçülebildi: en zayıf adım %87,3, adım olasılıklarının çarpımı %77,8; işlem adımından sonra %93,8'e karşı %83,8. Yani "plan güveni çarpım değil, en zayıf adımdır" kararı ölçümle destekleniyor.
@@ -836,7 +843,7 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 
 ### Sonraki denemeler (ölçülmedi)
 
-- İki hop'lu sorular: dördünün de ikinci hop'u eksik, kalan tek hop öbeği bu. İfadeden okunabilir tek işaret `t01`'in "two steps away"i.
+- İkinci hop'un tipi: `t02`, `t03` ve `s05` az önce attıkları hop'un tersini seçiyor, yani geldikleri yere dönüyor.
 - Metrik adımı: `collect` ile sayım arasındaki seçim iki soruda da yanlış tarafa düştü.
 - Aynı düzenekle Jev backend'ini ölçmek (`DECISION_MODEL_BACKEND=jev`).
 

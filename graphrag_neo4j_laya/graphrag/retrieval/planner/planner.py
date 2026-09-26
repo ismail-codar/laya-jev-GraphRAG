@@ -172,6 +172,8 @@ class _Planning:
         return [r[f"{probe.target}_name"] for r in rows]
 
     def hops(self) -> None:
+        least, exact = candidates.hops_asked_for(self.question, self.p.relation_schema,
+                                                 self.p.relation_words)
         for i in range(self.p.max_hops):
             step = f"hop{i}"
             moves = self.p.db.frontier_moves(self.frontier())
@@ -207,6 +209,15 @@ class _Planning:
                                                       self.p.relation_words)
                 if named:
                     options = candidates.only_this_relation(options, named)
+            elif i < least:
+                # The question asks for a longer path than the plan has
+                # walked. Measured: offered `stop` here, the model took it in
+                # all four two-hop questions of the labelled set.
+                options.pop("stop")
+            elif exact:
+                # It said how many steps, and the plan has taken them.
+                self.forced(step, "stop")
+                return
             # One option is not a choice, and asking would let a meaningless
             # probability into the plan's confidence.
             selected = (self.forced(step, next(iter(options))) if len(options) == 1

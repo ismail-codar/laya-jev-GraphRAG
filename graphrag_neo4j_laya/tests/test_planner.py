@@ -290,6 +290,42 @@ class TestHopLoop:
         hop0 = next(t for t in result.trace if t.step == "hop0")
         assert hop0.forced and hop0.selected == "DEVELOPED:out"
 
+    def test_a_stated_step_count_walks_exactly_that_far(self, science_graph):
+        model = ScriptedModel(choices=["count", "any:out", "RELATED_TO:out"])
+        result = _plan(science_graph, model, "How many entities are exactly two steps away from "
+                                             "Isaac Newton?", ["Isaac Newton"], max_hops=3)
+        assert result.plan.hops == [Hop(None, "out"), Hop("RELATED_TO", "out")]
+        assert "stop" not in model.choice_calls[2]          # hop1 may not stop short
+        assert next(t for t in result.trace if t.step == "hop2").forced   # nor walk on
+
+    def test_a_relation_named_twice_over_walks_two_steps(self, science_graph):
+        # "the idea Leibniz developed" describes the entity in the middle, so
+        # there is a step on either side of it.
+        # Leibniz has one move in the fixture graph, so hop0 needs no Choice.
+        model = ScriptedModel(choices=["list", "any:in", "stop"])
+        result = _plan(science_graph, model,
+                       "List everything the idea Gottfried Leibniz developed is connected to.",
+                       ["Gottfried Leibniz"])
+        assert len(result.plan.hops) == 2
+        assert "stop" not in model.choice_calls[1]
+
+    def test_one_reference_to_a_relation_may_stop_after_one_hop(self, science_graph):
+        model = ScriptedModel(choices=["list", "stop"])
+        result = _plan(science_graph, model, "What did Gottfried Leibniz develop?",
+                       ["Gottfried Leibniz"])
+        assert len(result.plan.hops) == 1
+        assert "stop" in model.choice_calls[1]
+
+    def test_what_the_question_asks_for(self, science_graph):
+        schema, words = {"DEVELOPED": "developed an idea"}, {"DEVELOPED": ("geliştir",)}
+        asked = lambda q: candidates.hops_asked_for(q, schema, words)
+        assert asked("What is Newton connected to?") == (1, False)
+        assert asked("What did Newton develop?") == (1, False)
+        assert asked("What is the idea Newton developed connected to?") == (2, False)
+        assert asked("Newton'un geliştirdiği şeyle ilişkili olanlar?") == (2, False)
+        assert asked("How many entities are exactly two steps away?") == (2, True)
+        assert asked("Newton'dan 3 adım uzaktaki varlıklar?") == (3, True)
+
     def test_empty_frontier_forces_stop_without_asking(self, science_graph):
         model = ScriptedModel(choices=["list"])
         result = _plan(science_graph, model, "Banana Bread neyle ilişkili?", ["Banana Bread"])
