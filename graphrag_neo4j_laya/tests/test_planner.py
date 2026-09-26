@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+from graphrag.retrieval.planner import candidates
 from graphrag.retrieval.planner.candidates import extract_numbers
 from graphrag.retrieval.planner.plan import FieldRef, Filter, Hop, Metric
 from graphrag.retrieval.planner.planner import GuidedQueryPlanner
@@ -35,7 +36,7 @@ class TestAcceptancePlans:
         assert set(model.choice_calls[1]) == {"DEVELOPED:in", "BORN_IN:in", "any:in"}
 
     def test_ae2_group_by_relation_type(self, science_graph):
-        model = ScriptedModel(choices=["group", "any:out", "stop", "count"],
+        model = ScriptedModel(choices=["any:out", "stop", "count"],
                               batch={"key:e0.type": 0.9})
         result = _plan(science_graph, model, "Her ilişki tipinde kaç kenar var?", ["Calculus"])
         assert result.plan.start is None
@@ -49,6 +50,107 @@ class TestAcceptancePlans:
         result = _plan(science_graph, model, "Einstein'ın doğduğu yerde doğan başka kim var?", ["Albert Einstein"])
         assert result.plan.hops == [Hop("BORN_IN", "out"), Hop("BORN_IN", "in")]
         assert result.plan.filters == [Filter(FieldRef("v2", "name"), "!=", "Albert Einstein")]
+
+
+class TestOperationStep:
+    """
+    Code removes the operations the wording rules out; the model picks among
+    the rest. Every operation error on the labelled set was a `group` question
+    read as something else, or `rank` chosen with nothing to rank.
+    """
+
+    @staticmethod
+    def _offered(model) -> set[str]:
+        return set(model.choice_calls[0])
+
+    @pytest.mark.parametrize("question", [
+        "How many relations of each type does Isaac Newton have?",
+        "Isaac Newton'un her ilişki türünden kaç farklı hedefi var?",
+    ])
+    def test_a_distributive_question_is_a_group(self, science_graph, question):
+        model = ScriptedModel(choices=["any:out", "stop", "count"], batch={"key:e0.type": 0.9})
+        result = _plan(science_graph, model, question, [])
+        assert result.plan.operation == "group"
+        assert next(t for t in result.trace if t.step == "operation").forced
+
+    @pytest.mark.parametrize("question", [
+        "List every place in the graph.",          # "every" is not distributive
+        "Her şey kaç tane?",                       # "her şey" is "everything"
+    ])
+    def test_these_are_not_distributive(self, science_graph, question):
+        model = ScriptedModel(choices=["count", "stop"])
+        result = _plan(science_graph, model, question, [])
+        assert not next(t for t in result.trace if t.step == "operation").forced
+
+    def test_a_superlative_wins_over_a_distributive_marker(self, science_graph):
+        # "the most per type" is still a ranking, so the Choice decides.
+        model = ScriptedModel(choices=["rank", "any:out", "stop", "count"],
+                              nouls=[0.1], batch={"key:e0.type": 0.9})
+        result = _plan(science_graph, model, "Which type has the most edges of each kind?", [])
+        assert result.plan.operation == "rank"
+
+    def test_rank_needs_a_superlative(self, science_graph):
+        model = ScriptedModel(choices=["group", "any:out", "stop", "count"], batch={"key:v0.name": 0.9})
+        _plan(science_graph, model, "Which entities have 2 outgoing relations?", [])
+        assert "rank" not in self._offered(model)
+
+    @pytest.mark.parametrize("question", [
+        "En çok giden ilişkisi olan 2 varlık hangisi?",
+        "Which entity has the most connections?",
+    ])
+    def test_a_superlative_keeps_rank(self, science_graph, question):
+        model = ScriptedModel(choices=["rank", "any:out", "stop", "count"],
+                              nouls=[0.1], batch={"key:v0.name": 0.9})
+        _plan(science_graph, model, question, [])
+        assert "rank" in self._offered(model)
+
+    @pytest.mark.parametrize("question", [
+        "Which entities have at least 2 outgoing relations?",
+        "Which relation types occur more than once?",
+        "Graph'ta 1'den fazla geçen ilişki türleri hangileri?",
+        "En az 2 ilişkisi olan varlıklar hangileri?",
+    ])
+    def test_a_threshold_question_is_a_group(self, science_graph, question):
+        model = ScriptedModel(choices=["any:out", "stop", "count"], batch={"key:v0.name": 0.9})
+        result = _plan(science_graph, model, question, [])
+        assert result.plan.operation == "group"
+        assert next(t for t in result.trace if t.step == "operation").forced
+
+    @pytest.mark.parametrize("question", [
+        "Which entities have at least 2 outgoing relations?",
+        "En az 2 ilişkisi olan varlıklar hangileri?",
+    ])
+    def test_a_threshold_is_not_a_superlative(self, science_graph, question):
+        # "at least 2" / "en az 2" belongs to HAVING, not to an ordering,
+        # although both end in a word the superlative match would take.
+        assert not candidates.asks_for_a_ranking(question)
+
+    def test_a_superlative_before_a_number_still_ranks(self, science_graph):
+        # "en çok ... 2 varlık" is "the top 2", not a threshold.
+        assert candidates.asks_for_a_ranking("En çok giden ilişkisi olan 2 varlık hangisi?")
+        assert not candidates.sets_a_threshold("En çok giden ilişkisi olan 2 varlık hangisi?")
+
+    def test_a_bare_number_is_not_a_threshold(self, science_graph):
+        assert not candidates.sets_a_threshold("Which entities have 2 outgoing relations?")
+
+    @pytest.mark.parametrize("question", [
+        "How many entities are there in the graph?",
+        "Isaac Newton kaç eser yazdı?",
+    ])
+    def test_a_how_many_question_is_never_a_list(self, science_graph, question):
+        model = ScriptedModel(choices=["count", "stop"])
+        _plan(science_graph, model, question, [])
+        assert "list" not in self._offered(model)
+
+    def test_a_which_question_keeps_list(self, science_graph):
+        model = ScriptedModel(choices=["list", "stop"])
+        _plan(science_graph, model, "List every place in the graph.", [])
+        assert "list" in self._offered(model)
+
+    def test_both_rules_can_apply_at_once(self, science_graph):
+        model = ScriptedModel(choices=["count", "stop"])
+        _plan(science_graph, model, "Isaac Newton kaç eser yazdı?", [])
+        assert self._offered(model) == {"count", "group"}
 
 
 class TestStartStep:

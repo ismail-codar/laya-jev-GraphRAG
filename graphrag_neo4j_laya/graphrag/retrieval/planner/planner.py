@@ -124,8 +124,31 @@ class _Planning:
     # ── steps ────────────────────────────────────────────────────────────────
 
     def operation(self) -> None:
+        # Every operation error measured on the labelled set was a `group`
+        # question read as something else, or `rank` chosen for a question with
+        # nothing to rank, so the wording decides what it can and the model
+        # picks among the rest.
+        #
+        # "How many relations of each type ...?" asks for one answer per type;
+        # asked as a Choice, every such question came back as `count` or
+        # `list`. A superlative still goes to the Choice, where `rank` lives.
+        #
+        # "... at least 2 outgoing relations" compares a per-entity quantity
+        # with a number, which is a group plus a HAVING; counting the groups
+        # that pass is not expressible in this grammar anyway, so a threshold
+        # goes to `group` whichever way the question is phrased.
+        ranking = candidates.asks_for_a_ranking(self.question)
+        if not ranking and (candidates.asks_per_group(self.question)
+                            or candidates.sets_a_threshold(self.question)):
+            self.plan.operation = self.forced("operation", "group")
+            return
+        options = dict(_OPERATION_OPTIONS)
+        if not ranking:
+            options.pop("rank")          # nothing to order by
+        if candidates.asks_for_a_number(self.question):
+            options.pop("list")          # "how many" asks for a number, not for the entities
         self.plan.operation = self.choose("operation", "What kind of answer does the question ask for?",
-                                          _OPERATION_OPTIONS)
+                                          options)
 
     def start(self, seeds: list[str]) -> None:
         # Measured as the weakest step of the planner: asked as a Choice, the

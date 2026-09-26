@@ -22,6 +22,51 @@ def extract_numbers(text: str) -> list[int | float]:
     return [int(raw) if raw.isdigit() else float(raw.replace(",", ".")) for raw in _NUMBER_RE.findall(text)]
 
 
+# "at least 2" is a threshold, not a superlative: it belongs to HAVING, not to
+# an ordering. Stripped before the superlative match below. Turkish "en az" is
+# a superlative on its own ("the fewest") and a threshold in front of a number
+# ("en az 2"), which is why that branch requires the digits.
+_THRESHOLD_RE = re.compile(
+    r"(?<!\w)("
+    r"at (least|most)|more than|less than|fewer than|greater than|"
+    r"en\s+(az|fazla|çok)\s+\d+|"
+    r"\d+['’]?[dt][ae]n\s+(fazla|az|çok)"
+    r")(?!\w)",
+    re.IGNORECASE,
+)
+_SUPERLATIVE_RE = re.compile(
+    r"(?<!\w)(most|least|highest|lowest|largest|smallest|top|maximum|minimum|fewest|"
+    r"en\s+(çok|fazla|az|büyük|küçük|yüksek|düşük))(?!\w)",
+    re.IGNORECASE,
+)
+# "for each X" / "her X" asks for one answer per X, which is what `group`
+# returns. English "every" is deliberately not a marker — "list every place"
+# is a plain list — and Turkish "her şey" / "her biri" mean "everything" and
+# "each one", neither of which names a class to break the answer down by.
+_DISTRIBUTIVE_RE = re.compile(r"(?<!\w)(each|per|her(?!\s+(şey|biri|hangi)))(?!\w)", re.IGNORECASE)
+_COUNT_QUESTION_RE = re.compile(r"(?<!\w)(how many|how much|kaç|ne kadar)(?!\w)", re.IGNORECASE)
+
+
+def asks_for_a_ranking(text: str) -> bool:
+    """Does the question ask which entity has the most or the least of something?"""
+    return bool(_SUPERLATIVE_RE.search(_THRESHOLD_RE.sub(" ", text)))
+
+
+def asks_per_group(text: str) -> bool:
+    """Does the question ask for an answer per category ("of each type")?"""
+    return bool(_DISTRIBUTIVE_RE.search(text))
+
+
+def sets_a_threshold(text: str) -> bool:
+    """Does the question compare a quantity with a number ("at least 2")?"""
+    return bool(_THRESHOLD_RE.search(text))
+
+
+def asks_for_a_number(text: str) -> bool:
+    """Does the question ask how many, rather than which?"""
+    return bool(_COUNT_QUESTION_RE.search(text))
+
+
 def mentions_entity(text: str, name: str) -> bool:
     """
     Does *text* name the entity *name*?

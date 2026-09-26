@@ -74,7 +74,7 @@ class TestFactsAndAnswers:
         assert "1" in fact["text"] and "Gottfried Leibniz" in fact["text"]
 
     def test_group_result_has_one_fact_per_row(self, science_graph):
-        model = ScriptedModel(choices=["group", "any:out", "stop", "count"],
+        model = ScriptedModel(choices=["any:out", "stop", "count"],
                               batch={"key:e0.type": 0.9}, nouls=[0.9])
         result = _run(science_graph, model, "Her ilişki tipinde kaç kenar var?", [])
         assert result.plan.keys == [FieldRef("e0", "type")]
