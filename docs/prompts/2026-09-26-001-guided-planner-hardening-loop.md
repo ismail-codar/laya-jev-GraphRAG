@@ -128,6 +128,8 @@ Kronolojik; her satır bir commit. Ölçümler gerçek Laya, aynı 34 soru.
 | 14 | Geri okuma eşik değil karşılaştırma: plan ile onarım adayı puanlanır, iyisi çalışır | doğru planı koruma %50 → **%79,2**, yanlış planı yenme %66,7 → **%79,2** |
 | 15 | `aggregate` rotası koda: soru sayı / hepsi / sıralama / döküm istiyor mu | recall %37,5 → **%100**, yanlış yönlendirme %10 → **%0** |
 | 16 | Üç stratejinin ifadesi cevabın biçimiyle yazıldı | agregasyon olmayan 3 / 10 → **7 / 10**, yönlendirme doğruluğu → **%91,2** |
+| 17 | Sete altı `global` sorusu (3 en + 3 tr); rota ölçülebilir hale geldi | `global` 9'da 2 — model altısını `multi_hop` sanıyor |
+| 18 | `global` koda: soru hem graph'ı anıyor hem bütününü soruyorsa | `global` %22,2 → **%88,9**, yönlendirme **%97,5** (40 soru) |
 
 ### Çürütülen varsayımlar — tekrar denemeyin
 
@@ -171,9 +173,8 @@ Kronolojik; her satır bir commit. Ölçümler gerçek Laya, aynı 34 soru.
 2. **Geri okumanın maliyeti** — her soruda bir plan kurma + bir `Noul` daha. Marjı büyük
    planlarda (model kararsız değilken) atlanabilir; ölçecek yanlış plan kalmadığı için
    denenmedi.
-3. **`global` rotası** — kalan üç yönlendirme hatasının üçü de orada; model dört ayrı ifadenin
-   hiçbirinde `global`'i seçmedi. Sette yalnız üç `global` sorusu var, o yüzden kural yazmak
-   ezberlemek olur: önce soru gerekiyor.
+3. **`n12`** — "What kind of knowledge does this graph hold?": graph'ı anıyor ama özet
+   istemiyor, kod kuralına girmiyor ve model `multi_hop` sanıyor. Kalan tek yönlendirme hatası.
 4. **Jev backend'ini aynı düzenekle ölçmek** (`DECISION_MODEL_BACKEND=jev`).
 
 ---

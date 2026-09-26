@@ -28,6 +28,7 @@ model picks among the three retrieval strategies as before.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from enum import Enum
 
@@ -56,6 +57,28 @@ _ROUTE_OPTIONS: dict[str, str] = {
     "multi_hop": "The answer is the chain of relations between two named entities.",
     "global":    "The answer is a summary of the graph as a whole.",
 }
+
+# `global` is the one route the model would not take: over the nine labelled
+# questions that ask for it, it picked `global` twice and `multi_hop` six
+# times, under four different wordings of the options. What those questions
+# have in common is their subject — they ask about the graph itself, not
+# about anything in it — and they say both halves of that: they name the
+# graph ("this knowledge graph", "bu grafın") and they ask to be told about
+# it as a whole rather than for one fact ("overview", "main themes", "özet").
+# A question that names the graph without asking for the whole of it stays
+# with the model: it may well be about one entity in it.
+_THE_GRAPH_RE = re.compile(r"(?<!\w)(graph|graf\w*)(?!\w)", re.IGNORECASE)
+_AS_A_WHOLE_RE = re.compile(
+    r"(?<!\w)(overview|summary|summaris\w*|summariz\w*|describe|description|"
+    r"theme\w*|topics?|big picture|about|"
+    r"özet\w*|genel\w*|tema\w*|çerçeve\w*|anlat\w*|konu\w*)(?!\w)",
+    re.IGNORECASE)
+
+
+def asks_about_the_graph_itself(text: str) -> bool:
+    """Does the question ask what the graph as a whole is about?"""
+    return bool(_THE_GRAPH_RE.search(text) and _AS_A_WHOLE_RE.search(text))
+
 
 @dataclass
 class RouteDecision:
@@ -104,10 +127,17 @@ class IntentRouter:
         fallback = max(_ROUTE_OPTIONS, key=lambda k: probs.get(k, 0.0)) if probs else "multi_hop"
         # The model always names a retrieval strategy; it is the fallback the
         # aggregate route falls back to, and the route itself when the
-        # question asks for nothing to count, list, rank or break down.
+        # question neither asks for something to count, list, rank or break
+        # down, nor asks what the graph as a whole is about.
         aggregate = (settings.aggregate_route_enabled
                      and candidates.asks_for_an_aggregate(user_query))
-        label  = "aggregate" if aggregate else (result.selected or "multi_hop")
+        if aggregate:
+            label, confidence = "aggregate", 1.0
+        elif asks_about_the_graph_itself(user_query):
+            label, confidence = "global", 1.0
+        else:
+            label = result.selected or "multi_hop"
+            confidence = float(probs.get(label, result.score))
         intent = QueryIntent(label)
 
         logger.info(
@@ -117,6 +147,6 @@ class IntentRouter:
         logger.debug("Router raw probs: %s", result.raw_probs)
         return RouteDecision(
             intent=intent,
-            confidence=1.0 if aggregate else float(probs.get(label, result.score)),
+            confidence=confidence,
             fallback=QueryIntent(fallback),
         )

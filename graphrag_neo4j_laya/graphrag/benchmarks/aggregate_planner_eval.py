@@ -339,6 +339,11 @@ def summarise(records: list[dict[str, Any]]) -> dict[str, Any]:
         "aggregate_route_recall": _rate([r["route_correct"] for r in agg]),
         "misrouting_rate": _rate([r["misrouted"] for r in non_agg]),
         "route_accuracy": _rate([r["route_correct"] for r in records]),
+        # Per intent, because the set is not balanced between them.
+        "route_by_intent": {
+            i: {"rate": _rate([r["route_correct"] for r in records if r["intent"] == i]),
+                "questions": sum(1 for r in records if r["intent"] == i)}
+            for i in sorted({r["intent"] for r in records})},
         "by_lang": {},
         # The check reads two plans back against the question and keeps the
         # better one, so what it has to get right is the comparison: the
@@ -404,6 +409,9 @@ def format_report(summary: dict[str, Any]) -> str:
     for lang, s in summary["by_lang"].items():
         lines.append(f"  {lang}: exact {pct(s['exact_plan_match'])}  result {pct(s['result_match'])}  "
                      f"route {pct(s['route_accuracy'])}  (n={s['questions']})")
+    lines.append("Routing by intent " + " ".join(
+        f" {i} {pct(v['rate'])} (n={v['questions']})"
+        for i, v in summary["route_by_intent"].items()))
     check = summary["check"]
     sep = summary["confidence_separation"]
     lines += [

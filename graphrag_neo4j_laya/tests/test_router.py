@@ -50,6 +50,26 @@ class TestRouterOptions:
         assert router.route("How many theories are there?") == QueryIntent.LOCAL
 
 
+class TestGlobalRoute:
+    def test_a_question_about_the_graph_as_a_whole_is_global(self, monkeypatch):
+        monkeypatch.setattr(settings, "aggregate_route_enabled", True)
+        router, _ = _router("multi_hop", {"local": 0.2, "multi_hop": 0.7, "global": 0.1})
+        assert router.route("What are the main themes of this knowledge graph?") == QueryIntent.GLOBAL
+        assert router.route("Bu bilgi grafının özetini çıkar.") == QueryIntent.GLOBAL
+
+    def test_naming_the_graph_alone_leaves_the_route_to_the_model(self, monkeypatch):
+        # It names the graph but asks for no account of the whole of it, so it
+        # may well be about one entity in it.
+        monkeypatch.setattr(settings, "aggregate_route_enabled", True)
+        router, _ = _router("local", {"local": 0.7, "multi_hop": 0.2, "global": 0.1})
+        assert router.route("What kind of knowledge does this graph hold?") == QueryIntent.LOCAL
+
+    def test_counting_over_the_graph_is_still_the_aggregate_route(self, monkeypatch):
+        monkeypatch.setattr(settings, "aggregate_route_enabled", True)
+        router, _ = _router("local", {"local": 0.7, "multi_hop": 0.2, "global": 0.1})
+        assert router.route("How many entities are there in the graph?") == QueryIntent.AGGREGATE
+
+
 class TestRouteDetailed:
     def test_confidence_and_fallback(self, monkeypatch):
         monkeypatch.setattr(settings, "aggregate_route_enabled", True)

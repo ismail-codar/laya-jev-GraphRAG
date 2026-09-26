@@ -250,6 +250,18 @@
     {"id": "n09", "lang": "tr", "category": "non_aggregate", "intent": "global",
      "question": "Bu bilgi grafındaki ana temalar nelerdir?", "seeds": []},
     {"id": "n10", "lang": "tr", "category": "non_aggregate", "intent": "local",
-     "question": "Genel görelilik neyi açıklar?", "seeds": ["General Relativity"]}
+     "question": "Genel görelilik neyi açıklar?", "seeds": ["General Relativity"]},
+    {"id": "n11", "lang": "en", "category": "non_aggregate", "intent": "global",
+     "question": "Summarise what this knowledge graph is about.", "seeds": []},
+    {"id": "n12", "lang": "en", "category": "non_aggregate", "intent": "global",
+     "question": "What kind of knowledge does this graph hold?", "seeds": []},
+    {"id": "n13", "lang": "en", "category": "non_aggregate", "intent": "global",
+     "question": "Describe the big picture of the research in this graph.", "seeds": []},
+    {"id": "n14", "lang": "tr", "category": "non_aggregate", "intent": "global",
+     "question": "Bu graf genel olarak neyi anlatıyor?", "seeds": []},
+    {"id": "n15", "lang": "tr", "category": "non_aggregate", "intent": "global",
+     "question": "Bu bilgi grafının özetini çıkar.", "seeds": []},
+    {"id": "n16", "lang": "tr", "category": "non_aggregate", "intent": "global",
+     "question": "Graftaki çalışmaların genel çerçevesi nedir?", "seeds": []}
   ]
 }

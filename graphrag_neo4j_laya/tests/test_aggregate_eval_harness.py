@@ -67,7 +67,7 @@ class TestQuestionSet:
     def test_composition(self):
         categories = ("simple", "grouped", "two_hop", "semantic", "non_aggregate")
         counts = {c: sum(i["category"] == c for i in ITEMS) for c in categories}
-        assert counts == {"simple": 10, "grouped": 7, "two_hop": 4, "semantic": 3, "non_aggregate": 10}
+        assert counts == {"simple": 10, "grouped": 7, "two_hop": 4, "semantic": 3, "non_aggregate": 16}
         assert sum(i["lang"] == "tr" for i in ITEMS) >= len(ITEMS) / 3
         assert len({i["id"] for i in ITEMS}) == len(ITEMS)
 
@@ -115,7 +115,8 @@ class TestHarness:
     def test_non_aggregate_routed_to_aggregate_counts_as_misrouting(self, science_graph):
         item = next(i for i in ITEMS if i["id"] == "n01")
         _, summary = _run(science_graph, router=OracleRouter({item["question"]: QueryIntent.AGGREGATE}))
-        assert summary["misrouting_rate"] == pytest.approx(0.1)
+        non_aggregate = sum(i["intent"] != "aggregate" for i in ITEMS)
+        assert summary["misrouting_rate"] == pytest.approx(1 / non_aggregate)
         assert summary["targets"]["misrouting_rate"] is False
 
     def test_declined_plan_counts_as_wrong(self, science_graph):

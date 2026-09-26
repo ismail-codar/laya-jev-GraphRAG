@@ -856,11 +856,12 @@ Yöntem 1–5'in yapamadığı çok adımlı yol filtreleri de bu yolla ifade ed
 
 ### Ölçüm (gerçek Laya)
 
-Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `examples/data/aggregate_eval.json`, 34 soru: 10 basit, 7 gruplu / filtreli, 4 iki hop'lu, 3 anlamsal filtreli agregasyon, ve 10 agregasyon olmayan soru; 14'ü Türkçe. Seed'ler setten gelir, yani seed seçim hataları sayılara karışmaz. Laya `multilingual` checkpoint, CPU, 2026-09-25.
+Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `examples/data/aggregate_eval.json`, **40 soru**: 10 basit, 7 gruplu / filtreli, 4 iki hop'lu, 3 anlamsal filtreli agregasyon, ve 16 agregasyon olmayan soru (9 `global`, 4 `local`, 3 `multi_hop`); 17'si Türkçe. Set 2026-09-26'da altı `global` sorusuyla büyüdü: yönlendirmenin tek zayıf rotası oydu ve üç soruyla ölçülemiyordu. Seed'ler setten gelir, yani seed seçim hataları sayılara karışmaz. Laya `multilingual` checkpoint, CPU, 2026-09-26.
 
-> Aşağıdaki tablo `g02` düzeltildikten sonraki ölçüm — etiketli setin **bütün adımları 24 / 24**.
-> Parantezdeki değerler bir önceki ölçüm; tek fark, bütün graph'tan atılan ilk hop'un yönü artık
-> modele sorulmuyor.
+> Aşağıdaki tablo yönlendirme turlarından ve altı yeni `global` sorusundan sonraki ölçüm.
+> Planlayıcı satırları 24 agregasyon sorusunda hâlâ 24 / 24; yönlendirme satırları artık 40 soru
+> üzerinde, yani önceki 34 soruluk değerlerle birebir karşılaştırılamaz (parantezdeki değerler
+> yine de o ölçümden).
 
 | Ölçüm | Sonuç | Bayrak hedefi |
 | --- | --- | --- |
@@ -874,11 +875,12 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 | Sonuç eşleşmesi | %100 (24 / 24 — değişmedi) | ≥ %80 **✓** |
 | Agregasyon sorusunu `aggregate`'e yönlendirme | **%100** (önce %37,5) | |
 | Yanlış yönlendirme (agregasyon olmayan → `aggregate`) | **%0** (önce %10) | %0 **✓** |
-| Yönlendirme doğruluğu (34 soru) | **%91,2** (31 / 34 — önce %41,2) | |
+| Yönlendirme doğruluğu (40 soru) | **%97,5** (39 / 40 — 34 soruluk sette %41,2 → %91,2) | |
+| Niyet başına yönlendirme | `aggregate` %100 (24) · `local` %100 (4) · `multi_hop` %100 (3) · `global` **%88,9** (9) | |
 | Geri okuma: doğru planı koruma / yanlış planı yenme | **%79,2 / %79,2** (eşikliyken %50,0 / %66,7) | |
 | Min ve çarpım güveninin ayırma gücü | ölçülemiyor — ayıracak yanlış plan kalmadı (önce %87,0) | |
 | Dil kırılımı (tam plan · sonuç) | en **%100 · %100** — tr **%100 · %100** | |
-| Gecikme (ortalama) | yönlendirme 0,11 sn · plan 0,39 sn | |
+| Gecikme (ortalama) | yönlendirme 0,13 sn · plan 0,52 sn | |
 | Soru başına çağrı | **2,5 `Choice`** · 1,4 `Noul` · 0,0 `ask_batch` | |
 
 Üç bayrak hedefinin ikisi tuttu: sonuç eşleşmesi %91,7 ≥ %80 ve hop yönü %91,7 ≥ %90. Tutmayan tek hedef yanlış yönlendirme (%10, hedef %0) ve o planlayıcıda değil router'da; `aggregate` yönlendirmesi %37,5'te duruyor. Router rotası bu yüzden kapalı kalır.
@@ -914,7 +916,8 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 - **Bütün graph'tan atılan hop'un yönü modelin bilgisi değil, bir yazım kuralı: yön %95,8 → %100, tam plan %100.** Kalan tek hata `g02`'ydi ("How many edges of each relation type are there in the graph?"): model `any:in` diyordu, altın plan `any:out`. İkisi de aynı kenarları sayıyor — bütün graph üzerinde bir ilişkiyi hangi yönden okuduğunuz yalnız hangi ucun `v0` olduğunu değiştirir. Yani soruya cevabı olmayan bir soru soruluyordu. Kural: ilişkinin çıktığı uç `v0`'dır, çünkü bir varlığın ilişkilerini soran sorular bunu kastediyor ("giden ilişkisi olan", "hangi ilişki tiplerini kullanıyor"); soru öbür ucu kastettiğinde söylüyor ("incoming", "gelen"). Setteki altı bütün-graph hop'unun altısı da `out` ve ikisi yönü sözcükle söylüyor; başlangıç varlığı olan planlara dokunulmuyor, orada iki yön farklı varlıklara gidiyor ve karar modelde kalıyor (o sorularda zaten %100'dü).
 - **`aggregate` rotası modelin kararı değil, sorunun sözcükleri: recall %37,5 → %100, yanlış yönlendirme %10 → %0.** Dördüncü bir seçenek olarak sunulduğunda 24 agregasyon sorusunun 13'ü `local` ya da `multi_hop`'a gidiyordu ("How many places was Isaac Newton born in?" → `local`, P = 0,98), rotaya giren 11'in üçü de eşiğin altında kalıyordu; üstelik hiçbir şey saymayan üç soru bu rotaya çekiliyordu. Oysa planlayıcının cevaplayabildiği dört biçimin dördü de ifadede söyleniyor: bir sayı ("how many", "kaç"), bütün eşleşmeler ("list all", "tüm … listele"), bir sıralama ("en çok"), kategori başına bir döküm ("of each type", "her … türünden"). Bunlar işlem adımının zaten okuduğu sözcükler; router aynı okumayı kullanıyor. Etiketli setin 34 sorusunda kural birebir doğru: 24 agregasyon sorusunun hepsinde evet, 10 agregasyon olmayan sorunun hepsinde hayır. Seçenek listeden tamamen çıktığı için yanlış yönlendirme yapısal olarak sıfır. **Üç bayrak hedefi de ilk kez tuttu.**
 - **Üç stratejinin ifadesi de ölçüldü: 3 / 10 → 7 / 10.** Seçenek `aggregate` çıkınca kalan üçlü seçim ilk ölçümde geriledi (modelin yedi soruyu birden `local`'e koyduğu görüldü), yani ifade zaten zayıfmış. "Stratejinin karmaşıklığı ve kapsamı" yerine **cevabın biçimi** tarif edildi ("The answer is one fact about one named entity" / "… the chain of relations between two named entities" / "… a summary of the graph as a whole") ve yönerge "What does the question ask about?" oldu: `local` ve `multi_hop` sorularının yedisi de doğru. Yönlendirme doğruluğu %41,2 → **%91,2**.
-- **Kalan üç hata da `global`.** "Give me an overview…", "What are the main themes…", "Bu bilgi grafındaki ana temalar…" — denenen dört ifadenin hiçbirinde model `global`'i seçmedi. Bu sorularda da cevabın biçimi ifadede duruyor ("overview", "main themes", "ana tema"), ama etiketli sette yalnız üç `global` sorusu var: üç veri noktasına kural yazmak onları ezberlemek olur. Ölçülebilir hale gelmesi için daha çok `global` sorusu gerekiyor.
+- **`global` üç soruyla ölçülemiyordu; altı soru eklendi ve rota ölçülebilir oldu.** Dokuz `global` sorusuyla model 9'da 2 tutturuyor, altısını `multi_hop`'a gönderiyor — denenen dört ifadenin hiçbiri bunu değiştirmedi. Yeni sorular hem İngilizce hem Türkçe ve tek kalıp değil ("Summarise what this knowledge graph is about", "What kind of knowledge does this graph hold?", "Bu graf genel olarak neyi anlatıyor?", "Graftaki çalışmaların genel çerçevesi nedir?").
+- **`global` sorusunun konusu graph'ın kendisi ve bunu iki parça hâlinde söylüyor: %22,2 → %88,9.** Soru hem graph'ı adlandırıyor ("this knowledge graph", "bu grafın") hem de ondan bir bütün olarak söz edilmesini istiyor ("overview", "main themes", "özet", "genel çerçeve"). İkisi birden varsa rota `global` — ve iki koşul birden arandığı için graph'ı anan ama bütününü sormayan bir soru modele kalır, çünkü içindeki tek bir varlıkla ilgili olabilir. 40 sorunun 39'unda kural altın niyeti veriyor; tek istisna `n12` ("What kind of knowledge does this graph hold?"), graph'ı anıyor ama özet istemiyor — modele kalıyor ve model onu `multi_hop` sanıyor. **Yönlendirme doğruluğu %91,2 → %97,5** (40 soruda 39), Türkçe %100.
 - **Etiketli set artık doymuş durumda: her adım 24 / 24, tam plan ve sonuç %100.** Bunun bir bedeli var: güven ayırma gücü ölçülemiyor, çünkü ayıracak yanlış plan kalmadı. Planlayıcıyı bundan sonra ölçmek için yeni sorular gerekiyor.
 - **Güven ayırma gücü düşmeye devam ediyor** (min %62,5, çarpım %56,2). Adımların çoğu artık kodda ve 1,0 olasılıkla kayda geçiyor; geriye kalan `Choice`'lar tam da modelin kararsız olduğu yerler. Soru başına `Choice` 3,4'e, plan süresi 0,67 sn'ye indi.
 - **Zorlanan adım arttıkça güven ayırma gücü düştü** (min %93,8 → %78,7). Kalan `Choice`'lar tam da belirsiz olanlar; kodun aldığı adımlar 1,0 olasılıkla kayda geçtiği için güvene karışmıyor. Aynı sebeple soru başına `Choice` 3,7'den 3,6'ya, plan süresi 1,05 sn'den 0,82 sn'ye indi.
@@ -936,8 +939,8 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 - **Geri okumayı ne zaman yapacağımız**: şimdi her soruda yapılıyor ve bir plan kurma + bir
   `Noul` daha maliyeti var. En küçük marjın büyük olduğu planlarda (model kararsız değilken)
   atlanabilir — ama bunu ölçecek yanlış plan kalmadığı için denenmedi.
-- **`global` rotası**: kalan üç yönlendirme hatasının üçü de orada ve model dört ifadenin
-  hiçbirinde bu rotayı seçmedi. Önce daha çok `global` sorusu etiketlemek gerekiyor.
+- **`n12`**: "What kind of knowledge does this graph hold?" — graph'ı anıyor ama özet istemiyor,
+  o yüzden kod kuralına girmiyor; kalan tek yönlendirme hatası bu.
 - **Bayrak açıldı** (2026-09-26). Rota artık varsayılan olarak alınıyor; ölçüm hâlâ tek bir
   küçük graph üzerinde, başka bir graph'ta önce aynı düzenekle ölçün.
 - Metrik adımı: `collect` ile sayım arasındaki seçim iki soruda da yanlış tarafa düştü.
