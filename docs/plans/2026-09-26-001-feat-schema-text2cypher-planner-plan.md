@@ -19,7 +19,7 @@ execution: code
 - **Objective:** Doğal dilde bir soru ve metin olarak verilen bir graph şemasından çalıştırılabilir bir Neo4j Cypher sorgusu üretmek. Adayları kod şemadan üretir, Laya aralarından seçer, Cypher'ı yalnızca renderer yazar.
 - **Authority:** Bu plan > `docs/plans/2026-09-25-001-feat-guided-query-planner-plan.md` (mevcut planlayıcının kararları) > mevcut kod konvansiyonları.
 - **Execution profile:** Python, pytest, CPU üzerinde Laya. Canlı veritabanı gerekmez; tüm testler şema metni ve `tests/scripted_model.py` ile çalışır.
-- **Stop conditions:** Mevcut planlayıcı testleri (`graphrag_neo4j_laya/tests/test_planner*.py`, `test_plan_render.py`) U3'ten sonra kırılırsa durulur. U6 ölçümünde, gramerin kapsadığı alt kümede yapısal eşleşme %40'ın altında kalırsa da durulur. İki durumda da kullanıcıya dönülür.
+- **Stop conditions:** Mevcut planlayıcı testleri (`graphrag_neo4j_laya/tests/test_planner*.py`, `test_plan_render.py`) U3'ten sonra kırılırsa durulur. U8'deki model gerektirmeyen sondada doğru yol, gramerin kapsadığı alt kümenin %60'ından azında aday kümesine giriyorsa U5'e geçilmeden durulur. U6'da durma metriği (KTD9'da tanımlı) %40'ın altında kalırsa da durulur. Her durumda kullanıcıya dönülür.
 - **Tail ownership:** Modül bağımsız bir API ve CLI olarak teslim edilir. Pipeline'a veya router'a bağlanmaz. Bağlama kararı U6 sonuçlarıyla kullanıcıya aittir.
 
 ---
@@ -89,14 +89,18 @@ Hepsi kullanıcının verdiği FinCEN şemasıyla.
 ### Key Technical Decisions
 
 - KTD1. **Kardeş planlayıcı, genelleştirme değil.** Yeni kod `graphrag_neo4j_laya/graphrag/retrieval/text2cypher/` altına ayrı bir paket olarak yazılır. Mevcut `planner/` paketinde yalnızca davranışı değiştirmeyen bir çıkarma yapılır (U3). Gerekçe: Kùzu planlayıcısındaki kuralların neredeyse hepsi etiketli sette ölçülerek ayarlandı (`planner.py` içindeki "Measured:" yorumları). `QueryPlan`'ı çok etiketli hale getirmek bu kuralların hepsine dokunur. Birleştirme ertelendi (Scope Boundaries).
-- KTD2. **Yol adayları bütün olarak şemadan sayılır.** Canlı frontier olmadığı için hop-hop seçim yerine, şemanın desen graph'ında `max_hops`'a kadar tüm basit yollar kodla sayılır. Sorunun andığı etiketleri ve ilişkileri kapsamayan yollar elenir. Kalan yollar İngilizce açıklamalarıyla tek bir `Choice` olarak sunulur, tek aday kalırsa seçim zorunlu olur. Gerekçe: şema küçük (demo şemalarında 3–15 desen), yol uzayı sonlu. Bütün yolu seçmek, hop-hop seçimin "stop" hatasını ve yön hatasını ortadan kaldırır. Yön, desenin yönüdür, seçilmez.
-- KTD3. **Anılan etiketler ve ilişkiler sözcüksel eşleşmeyle bulunur.** Etiket ve ilişki adları, CamelCase ve `_` üzerinden parçalanıp kök eşleşmesiyle sorudaki sözcüklere bağlanır ("countries"→`Country`, "beneficiaries"→`BENEFITS`, "filings"→`Filing`). Bu, mevcut planlayıcının "sorudan okunabileni kod okur, gerisini model seçer" desenidir (`planner/candidates.py`). Eşleşme yoksa filtre uygulanmaz ve model tüm adaylar arasından seçer.
-- KTD4. **Değerler yalnızca sorudan gelir, property'yi model seçer.** Sayılar `planner.candidates.extract_numbers` ile çıkarılır. String adayları tırnak içi ifadeler ve büyük harfle başlayan sözcük dizileridir. Şemadaki `Example` değeriyle aynı biçimde olan bir aday (örneğin 3 harfli büyük harf kodu, `country: "CHN"`) o property'ye öncelikli bağlanır. Değer ile property eşleşmesi zorunlu değilse, yoldaki uygun tipli property'ler arasından `Choice` ile seçilir.
+- KTD2. **Yol adayları bütün olarak şemadan sayılır.** Canlı frontier olmadığı için hop-hop seçim yapılmaz. Bunun yerine `max_hops`'a kadar tüm yollar kodla sayılır. Bir yolda aynı desen iki kez kullanılamaz, ama etiketler tekrar edebilir: `(:Entity)-[:FILED]->(:Filing)-[:BENEFITS]->(:Entity)` gibi öz-birleşimler ifade edilebilir. Her desen iki yönde de yürünür. Adım, desenin yönünde render edilir (`->` veya `<-`), böylece `Entity<-ORIGINATOR-Filing-BENEFITS->Entity` gibi V şeklindeki yollar da aday olur. Birbirinin tam tersi olan yollar tekilleştirilir. Anılanların hepsini kapsayan yollar arasından yalnızca en kısa olanlar tutulur. Kalan yollar İngilizce açıklamalarıyla tek bir `Choice` olarak sunulur, tek aday kalırsa seçim zorunlu olur. Aday sayısı `text2cypher_max_path_candidates`'ı aşıyorsa soru belirsiz sayılır ve plan üretilemedi sonucu verir. Gerekçe: şema küçük (demo şemalarında 3–15 desen), yol uzayı sonlu. Bütün yolu seçmek, hop-hop seçimin "stop" hatasını ve yön hatasını ortadan kaldırır. Yön seçilmez.
+- KTD3. **Anılan etiketler, ilişkiler ve property'ler sözcüksel eşleşmeyle bulunur.** Etiket, ilişki ve property adları CamelCase ve `_` üzerinden parçalanır. Bir soru sözcüğü, tekil hali bir ad parçasına eşitse o adla eşleşir ("countries"→`Country`, "filings"→`Filing`). Ortak önek yalnızca yedek olarak kullanılır: en az 5 harf olmalı ve iki sözcüğün de en az %75'ini kapsamalı ("beneficiaries"→`BENEFITS`, ortak önek `benefi`). "count" ise `Country`'ye bağlanmaz. Bir sözcük hem bir property'ye hem bir etiket veya ilişkiye uyuyorsa ve sorudaki bir değer ona bağlanıyorsa ("whose country is 'CHN'") property anılması sayılır. Yol kapsama hesabına girmez. Bu, mevcut planlayıcının "sorudan okunabileni kod okur, gerisini model seçer" desenidir (`planner/candidates.py`). Hiçbir etiket eşleşmezse planlayıcı soru belirsiz diye reddeder.
+- KTD4. **Değerler yalnızca sorudan gelir. Property'yi önce kod okur, okuyamazsa model seçer.** Sayılar text2cypher'e özel bir çıkarıcıyla alınır: virgülden sonra tam üç rakam geliyorsa virgül binlik ayırıcıdır ("1,000,000" → 1000000). Mevcut `extract_numbers` Türkçe ondalık virgül için yazıldığından burada kullanılmaz. String adayları tırnak içi ifadeler ve büyük harfle başlayan sözcük dizileridir. Property şu sırayla bağlanır. (1) Soru property'nin adını değerin hemen yanında anıyorsa o property ("amount greater than"). (2) Değer bir `Example` değeriyle aynı biçimdeyse o property (3 harfli büyük harf kodu, `country: "CHN"`). (3) Hiçbiri değilse yoldaki uygun tipli property'ler arasından `Choice`. Değerin en iyi biçim eşleşmesi yolda değil de yola bir desen uzaklıktaki bir etiketteyse ("entities in China" → `Country.name`, örnek `"Afghanistan"`), o desenle uzatılmış yol da yol adaylarına eklenir ve seçimi model yapar.
 - KTD5. **Sayım varsayılanı satır sayımıdır.** `count(v)` kullanılır, `count(DISTINCT v)` yalnızca soru "distinct/different/unique" dediğinde seçilir. Gerekçe: veri setinin ve kullanıcı örneğinin konvansiyonu bu (AE1'de `COUNT(e)`). Bu, Kùzu planlayıcısının KTD7'sinden (varsayılan distinct) bilinçli bir sapmadır.
-- KTD6. **Renderer değerleri gömer, tanımlayıcıları yalnızca şemadan alır.** String'ler tek tırnakla yazılır, `\` ve `'` kaçışlanır. Sayılar Python sayı tipinden yazılır, başka tipte değer render edilemez. Etiket, ilişki ve property adları şemada yoksa render reddedilir. `[A-Za-z_][A-Za-z0-9_]*` dışındaki adlar backtick ile yazılır. Gerekçe: parametre yok (kapsam kararı), bu yüzden enjeksiyon yüzeyi tanımlayıcı whitelist'i (şema) ve literal kaçışıyla kapanır.
+- KTD6. **Renderer değerleri gömer, tanımlayıcıları yalnızca şemadan alır.** String'ler tek tırnakla yazılır, `\` ve `'` kaçışlanır. Sayılar Python sayı tipinden yazılır, başka tipte değer render edilemez. Etiket, ilişki ve property adları şemada yoksa render reddedilir. `[A-Za-z_][A-Za-z0-9_]*` dışındaki adlar backtick ile yazılır, adın içindeki backtick iki katına çıkarılır. Şema metni kullanıcıdan geldiği için whitelist tek başına yetmez. Gerekçe: parametre yok (kapsam kararı), bu yüzden enjeksiyon yüzeyi tanımlayıcı whitelist'i (şema) ve literal kaçışıyla kapanır.
 - KTD7. **Çıktı biçimi kanoniktir.** Biçim: `MATCH <yol> [WHERE …] [WITH … WHERE <having>] RETURN … [ORDER BY …] [LIMIT n]`. Değişkenler `v0…vN`, alias'lar okunur biçimdedir (`country_name`, `count_entity`). Karşılaştırma yapısaldır (U6), bu yüzden örnekteki `WITH … ORDER BY … LIMIT … RETURN` yazımına birebir uymak gerekmez.
-- KTD8. **Step makinesi paylaşılır.** `planner.py` içindeki `StepTrace`, `choose`/`forced`/`yes` mantığı ve `executor.py` içindeki `_repair_step` + geri çeviri kontrolü deseni tekrar yazılmaz. `StepTrace` ile seçim/trace mantığı davranış değiştirmeden paylaşılan bir modüle taşınır. Güven "en zayıf adım", onarım "en düşük marjlı adımı ikinci adayla yeniden kur" olarak kalır (önceki plan KTD4, KTD5).
-- KTD9. **Ölçüm yapısaldır, DB gerektirmez.** Referans ve üretilen sorgudan hafif bir parmak izi çıkarılır: etiketler, (kaynak, ilişki, hedef) desenleri, filtreler (property, operatör, normalize değer), dönen anahtarlar, agregasyon fonksiyonu ve hedefi, sıralama yönü ve limit. Değişken ve alias adları normalize edilir. Alt küme, referans sorgusu gramerde olan örneklerden seçilir. Gramer dışı yapılar (R6 listesi) içeren referanslar elenir ve bu elemenin oranı raporlanır. Gerekçe: kullanıcı kararı (DB gerektirmeyen ölçüm). Veri seti HF'den `huggingface_hub` ile indirilir, bu zaten bir bağımlılık.
+- KTD8. **Step makinesi paylaşılır.** `planner.py` içindeki `StepTrace`, `choose`/`forced`/`yes` mantığı ve `executor.py` içindeki `_repair_step` + geri çeviri kontrolü deseni tekrar yazılmaz. `StepTrace` ile seçim/trace mantığı davranış değiştirmeden paylaşılan bir modüle taşınır. Güven "en zayıf adım", onarım "en düşük marjlı adımı ikinci adayla yeniden kur" olarak kalır (önceki plan KTD4, KTD5). Varsayılanlar: `text2cypher_min_confidence` 0.3 (`aggregate_min_confidence` ile aynı), `text2cypher_max_path_candidates` 8. Bu tavan, yol seçiminin en düşük olasılığını tek düze dağılımda 1/8'in altına düşürmez. Bu sayede güven eşiği, seçenek sayısından kaynaklanan sistematik retlere dönüşmez. U6 güven ile doğruluk ilişkisini raporlar, eşik de oradan kalibre edilir.
+- KTD9. **Ölçüm yapısaldır, DB gerektirmez.** Referans ve üretilen sorgudan hafif bir parmak izi çıkarılır. Parmak izinin bileşenleri: (kaynak, ilişki, hedef) desenleri, filtreler, dönen anahtarlar, agregasyon fonksiyonu ve hedefi, sıralama yönü ve limit. Her değişken önce etiketine ve yoldaki konumuna çözülür. Filtreler, anahtarlar ve agregasyon hedefleri (etiket, konum, property) üçlüsüyle tutulur, yalnızca property adıyla tutulmaz. Değişken ve alias adları böylece önemsizleşir. Desen içi eşitlikler (`(e:Entity {country: 'CHN'})`) WHERE eşitliğine, yönsüz desenler (`-[:R]-`) şemadaki yöne normalize edilir. Scope Boundaries'teki dışlamalardan birini içeren referans gramer dışı sayılır: `OPTIONAL MATCH`, `CALL`, `UNION`, değişken uzunluklu yol, `CONTAINS`/`STARTS WITH`, ilişki property filtresi, çoklu `MATCH`, tarih/`POINT`/string fonksiyonu. Parmak izinin okuyamadığı referans da gramer dışı sayılır. Elenme oranları nedenleriyle birlikte raporlanır.
+  - **Durma metriği:** Tam parmak izi eşleşmesi. Payda, şeması ayrıştırılabilen tüm örneklenmiş gramer içi örneklerdir. "Üretilemedi" sonuçları payda içinde kalır ve kaçırma sayılır. Şema ayrıştırma hataları ayrı bir oran olarak raporlanır.
+  - **Oracle:** Altın yolun, filtre property'sinin ve değerin aday kümesinde bulunma oranı durma metriğinin yanında raporlanır. Böylece aday üretimi hataları Laya'nın seçim hatalarından ayrılır.
+  - **Veri:** Test split'inin parquet dosyası `huggingface_hub.hf_hub_download` ile indirilip pandas ile okunur. Bunun için `pyarrow` yeni bir bağımlılık olarak eklenir. Örnekleme, `data_source`'a göre tabakalandırılır; tek bir kaynağın şema biçimi veya soru üslubu sonucu belirlemesin.
+  - **Gerekçe:** kullanıcı kararı (DB gerektirmeyen ölçüm).
 
 ### High-Level Technical Design
 
@@ -108,11 +112,11 @@ flowchart TB
   SP --> GK{Gramer dışı sinyal?}
   GK -->|evet| FAIL
   GK -->|hayır| OP[İşlem: count/list/rank/group<br/>kelime kuralları + Choice]
-  OP --> MEN[Anılan etiket/ilişkiler<br/>sözcüksel eşleşme]
-  MEN --> PATH[Yol adayları: şema desen graph'ında<br/>max_hops'a kadar basit yollar]
-  PATH -->|0 aday| FAIL[Üretilemedi + gerekçe]
+  OP --> MEN[Anılanlar: property önce,<br/>sonra etiket/ilişki]
+  MEN --> PATH[Yol adayları: iki yönde, desen tekrarsız,<br/>en kısa kapsayanlar + değer uzatmaları]
+  PATH -->|0 aday, eksik kapsama<br/>veya tavan aşımı| FAIL[Üretilemedi + gerekçe]
   PATH --> PC[Choice: yol]
-  PC --> FIL[Filtreler: sorudaki değer →<br/>tipi uyan property, Choice]
+  PC --> FIL[Filtreler: değer → anılan property,<br/>Example biçimi, yoksa Choice]
   FIL --> SH[Şekil: hedef değişken, anahtar,<br/>metrik, having, sıra, limit]
   SH --> VAL{Şemaya karşı doğrula}
   VAL -->|geçersiz| FAIL
@@ -141,10 +145,10 @@ metric     := count(var) | count(DISTINCT var) | agg(var.prop)   # agg ∈ sum/a
 | --- | --- | --- |
 | İşlem | "most" üst derece → `rank` zorunlu | rank |
 | Anılanlar | countries→Country, entities→Entity, filings→Filing, beneficiaries→BENEFITS | 3 etiket, 1 ilişki |
-| Yol adayları | 3 etiketi ve BENEFITS'i kapsayan yollar | `Filing-BENEFITS->Entity-COUNTRY->Country` (tek aday, zorunlu) |
+| Yol adayları | Hepsini kapsayan yollar: 2 hop'luk `Filing-BENEFITS->Entity-COUNTRY->Country` ve 3 hop'luk `Entity-FILED->Filing-BENEFITS->Entity-COUNTRY->Country`. En kısası tutulur. | `Filing-BENEFITS->Entity-COUNTRY->Country` (tek aday, zorunlu) |
 | Filtre | sayı "3" top-k'ya harcanır | yok |
-| Anahtar | Choice: Country.name / code / tld | `v2.name` |
-| Metrik | rank + sayılan isim "entities" → `count(v1)` | `count(v1)` |
+| Anahtar | "Which … countries" → `Country` etiketi zorunlu. Property için Choice: name / code / tld | `v2.name` |
+| Metrik | "most" ipucunun yönettiği isim "entities" → `Entity` (v1) | `count(v1)` |
 | Sıra/limit | `small_limit` → 3, azalan | `ORDER BY … DESC LIMIT 3` |
 
 ### Sequencing
@@ -154,12 +158,16 @@ flowchart LR
   U1[U1 Şema ayrıştırıcı] --> U2[U2 Plan IR + Neo4j renderer]
   U3[U3 Paylaşılan step makinesi] --> U5
   U2 --> U4[U4 Şema adayları]
-  U4 --> U5[U5 Planlayıcı + kontrol + API/CLI]
+  U1 --> U8[U8 Parmak izi + aday sondası]
+  U4 --> U8
+  U8 -->|oracle ≥ %60| U5[U5 Planlayıcı + kontrol + API/CLI]
+  U4 --> U5
   U5 --> U6[U6 Ölçüm düzeneği]
+  U8 --> U6
   U6 --> U7[U7 Doküman]
 ```
 
-U3, U1–U2 ile paralel yapılabilir.
+U3, U1–U2 ile paralel yapılabilir. U8'in aday sondası U5'ten önce çalışır: aday üretimi altın yolu bulamıyorsa planlayıcıyı kurmanın anlamı yoktur (Goal Capsule stop condition).
 
 ---
 
@@ -237,7 +245,7 @@ U3, U1–U2 ile paralel yapılabilir.
 - `graphrag_neo4j_laya/graphrag/retrieval/planner/executor.py` (değişir)
 - `graphrag_neo4j_laya/tests/test_planner_steps.py` (yeni)
 
-**Approach:** `StepTrace`, `_Planning.forced`/`choose`/`yes` ve `_repair_step` bir temel sınıfa ve yardımcı fonksiyonlara taşınır. `_Planning` bu temel sınıftan türer, bağlam metnini (`context()`) alt sınıf tanımlar. `planner.py` ve `executor.py` içindeki eski adlar dışarıya import edilebilir kalır, çünkü testler ve `aggregate_planner_eval.py` onları kullanıyor.
+**Approach:** `StepTrace`, `_Planning.forced`/`choose`/`yes` ve `_repair_step` bir temel sınıfa ve yardımcı fonksiyonlara taşınır. `_Planning` bu temel sınıftan türer, bağlam metnini (`context()`) alt sınıf tanımlar. `planner.py` ve `executor.py` içindeki eski adlar (`StepTrace`, `PlannerResult`, `_parse_metric`, `GuidedQueryPlanner`) import edilebilir kalır, çünkü testler ve `aggregate_planner_eval.py` bunları kullanıyor. `_repair_step` şu anda adı `key:` ile başlayan adımları sabit olarak atlıyor. Bu Kùzu'ya özgü bir kural. Paylaşılan sürümde atlanacak adım önekleri bir parametre olur. Kùzu çağrısı `("key:",)` geçirir, text2cypher kendi listesini verir.
 
 **Execution note:** Önce mevcut planlayıcı testlerinin temiz geçtiğini kaydet. Taşımadan sonra aynı testler hiç değişmeden geçmeli.
 
@@ -245,7 +253,7 @@ U3, U1–U2 ile paralel yapılabilir.
 - Tek seçenekte `choose` çağrılmadan `forced` kaydı düşer, probability 1.0 olur.
 - Override edilen adım override değerini seçer ve `overridden=True` olur.
 - `yes`, eşik 0.5'te doğru tarafı seçer ve ikinci adayı kaydeder.
-- `_repair_step` zorunlu adımları atlar ve en küçük marjlı adımı döndürür.
+- `_repair_step` zorunlu adımları ve verilen önekle başlayan adımları atlar, en küçük marjlı adımı döndürür. Önek listesi boşken `key:` adımları da onarılabilir.
 - Entegrasyon: `tests/test_planner.py`, `test_planner_executor.py` ve `test_pipeline_aggregate.py` değişmeden geçer.
 
 **Verification:** Mevcut test paketi değişmeden yeşil kalır. Yeni modülün kendi testleri de geçer.
@@ -263,19 +271,26 @@ U3, U1–U2 ile paralel yapılabilir.
 - `graphrag_neo4j_laya/tests/test_text2cypher_candidates.py` (yeni)
 
 **Approach:**
-- Sözcüksel eşleşme (KTD3): ad parçaları, basit İngilizce çoğul/kök kuralıyla sorudaki sözcüklere bağlanır ("countries"/"country", "beneficiaries"/"benefits" ortak kök `benefi`). Kök için en az 4 harf gerekir.
-- Yol sayımı (KTD2): desenlerden yönlü bir etiket graph'ı kurulur. Her etiketten başlayıp `max_hops`'a kadar, aynı deseni iki kez kullanmayan yollar sayılır. Anılan etiketlerin ve ilişkilerin hepsini kapsayan yollar tutulur. Hiçbiri kapsamıyorsa en çok anılanı kapsayanlar kalır. Aday sayısı bir tavanla sınırlanır, taşarsa en kısalar kalır.
-- Kelime kuralları (işlem, top-k, karşılaştırma, distinct) `planner/candidates.py` içinden olduğu gibi kullanılır: `asks_for_a_ranking`, `asks_per_group`, `sets_a_threshold`, `comparison_from_wording`, `asks_for_a_number`, `extract_numbers`, `small_limit`.
-- Değer adayları (KTD4): tırnak içi ifadeler, büyük harfle başlayan diziler (cümle başındaki soru sözcüğü hariç), sayılar. Şema `Example` değerinin biçimiyle eşleşme puanı hesaplanır.
+- Sözcüksel eşleşme (KTD3): önce tekil eşitlik, sonra koşullu önek yedeği. Eşleşme property, etiket ve ilişki adlarının hepsine uygulanır. Değer bağlanan bir property anılması, aynı sözcüğün etiket veya ilişki anılmasının yerini alır.
+- Yol sayımı (KTD2): her desen iki yönde yürünür, bir yolda aynı desen bir kez kullanılır, tam ters yollar tekilleştirilir. Anılan etiketlerin ve ilişkilerin hepsini kapsayan yollardan en kısalar tutulur. Hiçbiri hepsini kapsamıyorsa en çok anılanı kapsayanlar "eksik kapsama" işaretiyle döner ve hangi anılanın dışarıda kaldığı kaydedilir. U5, dışarıda kalan bir etiket varsa reddeder. Yalnızca bir ilişki anılması dışarıda kaldıysa devam eder, çünkü ilişki eşleşmesi daha zayıf bir sinyaldir. Değer uzatmaları (KTD4) bu kümeye eklenir.
+- Kelime kuralları `planner/candidates.py` içinden kullanılır: `asks_for_a_ranking`, `asks_per_group`, `asks_for_a_number`, `small_limit`. Karşılaştırma için `comparison_from_wording` sarmalanır ve veri setinde sık geçen "above/over/exceeding" (>), "below/under" (<), "equal to/is" (=), "not" (<>) ifadeleri eklenir. `sets_a_threshold` işlemi zorlamak için kullanılmaz (U5). Sayılar KTD4'teki text2cypher çıkarıcısıyla alınır.
+- Değer adayları (KTD4): tırnak içi ifadeler, büyük harfle başlayan diziler (cümle başındaki soru sözcüğü hariç), sayılar. Her aday için anılan property'lere yakınlık ve şemadaki `Example` biçimiyle eşleşme puanı hesaplanır.
+- Operasyon ipucunun yönettiği isim: "how many X", "number of X", "most/least X", "names of X", "list X", "which X", "each/per X" kalıplarındaki X, bağlandığı etiketle döner. U5 hedef değişkeni ve grup anahtarını buradan okur.
 - Gramer dışı sinyaller (R6): "shortest path", "optional", "average time between", tarih ifadeleri. Bu sinyaller erken bir "üretilemedi" gerekçesi olarak döner.
 
 **Patterns to follow:** `graphrag_neo4j_laya/graphrag/retrieval/planner/candidates.py` (fonksiyon başına tek soru, regex sabitleri, "Measured:" gerekçe yorumları).
 
 **Test scenarios:**
-- Covers AE1. Anılanlar `{Country, Entity, Filing}` ve `{BENEFITS}` olur. Yol adayı olarak yalnızca `Filing-BENEFITS->Entity-COUNTRY->Country` kalır.
+- Covers AE1. Anılanlar `{Country, Entity, Filing}` ve `{BENEFITS}` olur. 3 hop'luk `Entity-FILED->Filing-BENEFITS->Entity-COUNTRY->Country` da kapsar ama en kısa kuralıyla elenir. Geriye yalnızca `Filing-BENEFITS->Entity-COUNTRY->Country` kalır. İpucu isimleri: "which" → `Country`, "most" → `Entity`.
+- Covers AE3. "country" sözcüğüne `'CHN'` değeri bağlandığı için `Entity.country` property anılması sayılır, `Country` ve `COUNTRY` anılması sayılmaz. Tek düğümlü `Entity` yolu aday olarak kalır. İpucu ismi: "names of" → `Entity`.
+- Covers AE2. "amount" → `Filing.amount` property anılması. `1000000` bu property'ye yakınlıkla bağlanır.
 - "Which entities filed filings?" `Entity-FILED->Filing` verir, `ORIGINATOR` yolu elenir.
 - Hiç etiket anmayan bir soru tüm tek etiketli ve tek hop'lu yolları aday bırakır, sayı tavanı aşılmaz.
-- `max_hops=1` ile AE1'de uygun yol kalmaz ve sonuç boş olur.
+- `max_hops=1` ile AE1'de hiçbir yol hepsini kapsamaz. En çok anılanı kapsayan `Filing-BENEFITS->Entity` "eksik kapsama" işaretiyle döner ve dışarıda kalan `Country` kaydedilir.
+- V şeklindeki yol: "Which entities originated filings that benefit entities in the same country?" için `Entity<-ORIGINATOR-Filing-BENEFITS->Entity` aday olur. Tam tersi olan yol ayrıca listelenmez.
+- Değer uzatması: "How many filings benefit entities in China?" için `Filing-BENEFITS->Entity` yolunun yanında `Filing-BENEFITS->Entity-COUNTRY->Country` da aday olur, çünkü "China" en iyi `Country.name` biçimine uyar.
+- "Count the filings with an amount over 5000" `Country` veya `COUNTRY` anmaz. Sayı `5000`, operatör `>` olur.
+- "greater than 1,000,000" `1000000` verir, `1.0` vermez.
 - Değerler: `'CHN'` → string adayı, `country` property'sine öncelikli. "Barclays Bank Plc" büyük harf dizisi olarak yakalanır. Cümle başındaki "Which" yakalanmaz.
 - "greater than 1000000" `>` ve `1000000` verir.
 - Covers AE4. "shortest path" gramer dışı gerekçesi döndürür.
@@ -298,19 +313,22 @@ U3, U1–U2 ile paralel yapılabilir.
 - `graphrag_neo4j_laya/config/settings.py` (değişir)
 - `graphrag_neo4j_laya/tests/test_text2cypher_planner.py` (yeni)
 
-**Approach:** Adım sırası: gramer dışı kontrolü → işlem → yol → filtreler → şekil (hedef değişken, anahtar, metrik, having, sıra/limit) → doğrulama. Kod bir adımı sorudan okuyabiliyorsa o adım zorunlu olur, okuyamıyorsa Laya seçer. Mevcut planlayıcının "sorudan okunabileni kod okur" kuralları bu adımlara uyarlanır. Hedef değişken seçimi (neyin sayıldığı veya listelendiği) sorunun andığı son etiketten zorunlu olarak alınır, belirsizse `Choice` ile seçilir. `list` işleminde dönen property, soru bir property anıyorsa odur, yoksa etiketin `name` property'si, o da yoksa `Choice` ile seçilir. Onarım ve kontrol U3'teki makineyle yapılır. `api.text_to_cypher(question, schema_text)` bir sonuç nesnesi döndürür: cypher (veya None), plan, trace, confidence, description, reason. Fonksiyon hiçbir zaman istisna fırlatmaz. Ayarlar: `text2cypher_max_hops` (varsayılan 3), `text2cypher_min_confidence`, `text2cypher_max_path_candidates`. CLI soruyu ve bir şema dosya yolunu alıp Cypher'ı yazdırır, `-v` ile trace'i de gösterir.
+**Approach:** Adım sırası: gramer dışı kontrolü → işlem → yol → filtreler → şekil (hedef değişken, anahtar, metrik, having, sıra/limit) → doğrulama. Kod bir adımı sorudan okuyabiliyorsa o adım zorunlu olur, okuyamıyorsa Laya seçer. Mevcut planlayıcının "sorudan okunabileni kod okur" kuralları bu adımlara uyarlanır. Hedef değişken (neyin sayıldığı veya listelendiği), U4'ün döndürdüğü operasyon ipucu isminin etiketidir. AE1'de "most entities" → `Entity`, AE2'de "how many filings" → `Filing`, AE3'te "names of entities" → `Entity`. `rank` ve `group` işlemlerinde grup anahtarının etiketi de aynı şekilde "which/each/per X" isminden gelir. İpucu ismi okunamıyorsa ya da o etiket yolda birden fazla konumdaysa, yoldaki değişkenler arasından `Choice` ile seçilir. Eşik kuralı: karşılaştırma sözcüğü yoldaki bir etiketin sayısal property anılmasına bağlanıyorsa ("amount greater than 1000000") sayı bir WHERE filtresi olur. Karşılaştırılan şey bir sayım veya agregasyonsa ("with more than 5 filings") group + HAVING olur. Kùzu planlayıcısındaki "her eşik group'a gider" kuralı alınmaz. `list` işleminde dönen property, soru bir property anıyorsa odur, yoksa etiketin `name` property'si, o da yoksa `Choice` ile seçilir. Onarım ve kontrol U3'teki makineyle yapılır. `api.text_to_cypher(question, schema_text)` bir sonuç nesnesi döndürür: cypher (veya None), plan, trace, confidence, description, reason. Fonksiyon hiçbir zaman istisna fırlatmaz. Ayarlar: `text2cypher_max_hops` (varsayılan 3), `text2cypher_min_confidence` (varsayılan 0.3), `text2cypher_max_path_candidates` (varsayılan 8). CLI soruyu ve bir şema dosya yolunu alıp Cypher'ı yazdırır, `-v` ile trace'i de gösterir. CLI mantığı bir `main(argv)` fonksiyonundadır, böylece test aynı süreç içinde model patch'lenerek çalıştırılabilir.
 
 **Patterns to follow:** `graphrag_neo4j_laya/graphrag/retrieval/planner/planner.py` (`GuidedQueryPlanner.plan`, hata yutma), `executor.py` (`_run` içindeki kontrol + onarım akışı), `config/settings.py` içindeki "Guided query planner" bloğu.
 
 **Test scenarios:**
 - Covers AE1. `ScriptedModel`'in anahtar adımında `v2.name`'i seçtiği senaryoda üretilen Cypher, U2'deki beklenen metinle aynıdır. Trace'te işlem ve yol adımları zorunlu olarak görünür.
-- Covers AE2. `count` + filtre. Filtre property'si `amount` tek sayısal aday olduğu için zorunludur.
-- Covers AE3. `list` + string filtresi. `country` property'si `Example` biçim eşleşmesiyle zorunludur.
+- Covers AE2. İşlem `count` olur, group olmaz. Filtre `WHERE v0.amount > 1000000` olur. Filtre property'si `amount`, soru onu andığı için zorunludur. `Filing`'in diğer sayısal property'leri (`number`, enlem/boylam) sunulmaz.
+- Eşik ile HAVING ayrımı: "Which entities benefit from more than 5 filings?" group + `HAVING count > 5` üretir, WHERE üretmez.
+- Eksik kapsama: `max_hops=1` ile AE1 sorusu için Cypher None olur, reason dışarıda kalan `Country` etiketini adıyla anar.
+- Yol adayı sayısı tavanı (8) aşarsa Cypher None ve reason "ambiguous path" olur, Laya çağrılmaz.
+- Covers AE3. `list` + string filtresi. Yol tek düğümlü `Entity` olur. `country` property'si, değerin anılan property'ye bağlanmasıyla zorunludur. Dönen property "names" anılmasından `name` olur.
 - Covers AE4. Cypher None olur, reason gramer dışı gerekçesini içerir, Laya çağrısı yapılmaz.
 - Güven eşik altında (ScriptedModel prob=0.3) olduğunda Cypher None ve reason "low confidence" olur.
 - Onarım: geri çeviri ilk planı düşük, ikinci adayla kurulanı yüksek puanlarsa onarılmış plan döner ve `repaired=True` olur.
 - Bozuk şema (desen yok) veya model istisnası durumunda istisna fırlatılmaz, None ve gerekçe döner.
-- CLI: fixture şema dosyası ve AE1 sorusuyla çalıştırıldığında stdout'a tek satır Cypher yazar (ScriptedModel patch'lenerek).
+- CLI: `main([...])` fixture şema dosyası ve AE1 sorusuyla aynı süreçte çağrıldığında stdout'a tek satır Cypher yazar (ScriptedModel patch'lenerek).
 
 **Verification:** AE1–AE4 uçtan uca geçer. Mevcut test paketi etkilenmez.
 
@@ -320,27 +338,64 @@ U3, U1–U2 ile paralel yapılabilir.
 
 **Requirements:** R9
 
-**Dependencies:** U5
+**Dependencies:** U5, U8
 
 **Files:**
 - `graphrag_neo4j_laya/graphrag/benchmarks/text2cypher_eval.py` (yeni)
-- `graphrag_neo4j_laya/graphrag/retrieval/text2cypher/fingerprint.py` (yeni)
 - `graphrag_neo4j_laya/examples/data/text2cypher_local.json` (yeni; AE1–AE4 ve ~15 elle etiketlenmiş FinCEN sorusu)
-- `graphrag_neo4j_laya/tests/test_text2cypher_fingerprint.py` (yeni)
 - `graphrag_neo4j_laya/tests/test_text2cypher_eval_harness.py` (yeni)
 
-**Approach:** `fingerprint`, KTD9'daki bileşenleri regex tabanlı hafif bir okuyucuyla bir Cypher metninden çıkarır. Okuyamadığı referansı "gramer dışı" olarak işaretler. Düzenek test split'ini `huggingface_hub` ile indirip yerel önbelleğe koyar. Referansı gramer içinde olan örnekleri bir tohumla örnekler (varsayılan 300). Her örnek için sorgu üretir ve şunları kaydeder: tam parmak izi eşleşmesi, bileşen bazında eşleşme (yol, filtre, agregasyon, sıra/limit), "üretilemedi" oranı ve gerekçe dağılımı. Terminal tablosu ve JSON çıktısı `aggregate_planner_eval.py` biçimindedir. Yerel set de aynı düzenekle, ağ gerekmeden çalışır.
+**Approach:** Düzenek, U8'deki veri yükleyicisini ve parmak izini kullanır. Referansı gramer içinde olan örneklerden `data_source`'a göre tabakalı bir örneklem alır (varsayılan 300, sabit tohum). Her örnek için sorgu üretir ve şunları kaydeder:
+- KTD9'daki durma metriği (tam parmak izi eşleşmesi, üretilemedi sonuçları kaçırma sayılır)
+- bileşen bazında eşleşme (yol, filtre, anahtar, agregasyon, sıra/limit)
+- oracle oranı (altın yol, filtre property'si ve değer aday kümesinde mi)
+- üretilemedi oranı ve gerekçe dağılımı
+- şema ayrıştırma hata oranı
+- elenme oranları, nedenleriyle
+- güven kovalarına göre doğruluk (eşik kalibrasyonu için)
+
+Terminal tablosu ve JSON çıktısı `aggregate_planner_eval.py` biçimindedir. Yerel set de aynı düzenekle, ağ gerekmeden çalışır.
 
 **Patterns to follow:** `graphrag_neo4j_laya/graphrag/benchmarks/aggregate_planner_eval.py` (argparse, özet tablo, JSON kaydı), `tests/test_aggregate_eval_harness.py`.
 
 **Test scenarios:**
-- Kullanıcının örnek sorgusu ile KTD7 biçimindeki karşılığı aynı parmak izini verir: değişken ve alias adları farklı, `WITH … ORDER BY … LIMIT … RETURN` ile `RETURN … ORDER BY … LIMIT` aynı sayılır.
-- `count(e)` ile `count(DISTINCT e)` farklı parmak izi verir. `>` ile `>=` farklı sayılır. `'CHN'` ile `"CHN"` aynı sayılır.
-- `OPTIONAL MATCH` veya `CALL` içeren bir referans gramer dışı işaretlenir.
 - Düzenek yerel set üzerinde ScriptedModel ile uçtan uca çalışır, özet alanlarını doğru hesaplar ve JSON yazar.
+- Durma metriği paydası: 4 gramer içi örnekten 1'i üretilemedi, 2'si eşleşti ise oran %50 olur, %67 olmaz.
+- Tabakalı örnekleme: iki `data_source`'lu sahte bir veri setinde örneklem her kaynaktan orantılı pay alır.
 - Ağ yokken HF indirmesi başarısız olursa açık bir hata mesajı verilir, yerel set yine de çalışır.
 
 **Verification:** Yerel set ölçümü CI'da ağ olmadan çalışır. HF alt kümesi ölçümü elle çalıştırılıp sonucu `graphrag_neo4j_laya/benchmarks/results/text2cypher_eval.json` olarak kaydedilir.
+
+### U8. Parmak izi, veri yükleyici ve aday sondası
+
+**Goal:** Ölçümün temelini (parmak izi, HF veri yükleyici) kurmak. Aday üretiminin altın yolu bulup bulmadığını, Laya'ya ve planlayıcıya gerek kalmadan, U5'ten önce ölçmek.
+
+**Requirements:** R9
+
+**Dependencies:** U1, U4
+
+**Files:**
+- `graphrag_neo4j_laya/graphrag/retrieval/text2cypher/fingerprint.py` (yeni)
+- `graphrag_neo4j_laya/graphrag/benchmarks/text2cypher_data.py` (yeni; HF indirme + önbellek + gramer içi filtre)
+- `graphrag_neo4j_laya/graphrag/benchmarks/text2cypher_candidate_probe.py` (yeni)
+- `graphrag_neo4j_laya/requirements.txt`, `graphrag_neo4j_laya/pyproject.toml` (değişir; `pyarrow`)
+- `graphrag_neo4j_laya/tests/test_text2cypher_fingerprint.py` (yeni)
+- `graphrag_neo4j_laya/tests/test_text2cypher_probe.py` (yeni)
+
+**Approach:** `fingerprint`, KTD9'daki bileşenleri regex tabanlı hafif bir okuyucuyla bir Cypher metninden çıkarır. Değişkenleri etiket ve konuma çözer, desen içi eşitlikleri ve yönsüz desenleri normalize eder. Scope Boundaries'teki her dışlamayı ve okuyamadığı her yapıyı nedenini belirterek "gramer dışı" işaretler. Veri yükleyici, test split'inin parquet dosyasını `hf_hub_download` ile yerel önbelleğe indirir ve pandas ile okur. Sonda, gramer içi her örnekte U4'ün aday kümesini üretir. Altın parmak izindeki yolun, filtre property'lerinin ve değerlerin bu kümede olup olmadığını sayar. Laya çağrılmaz. Sonuç JSON olarak kaydedilir. Yol oracle oranı %60'ın altındaysa Goal Capsule'daki stop condition tetiklenir.
+
+**Patterns to follow:** `graphrag_neo4j_laya/graphrag/benchmarks/aggregate_planner_eval.py`.
+
+**Test scenarios:**
+- Kullanıcının örnek sorgusu ile KTD7 biçimindeki karşılığı aynı parmak izini verir: değişken ve alias adları farklı, `WITH … ORDER BY … LIMIT … RETURN` ile `RETURN … ORDER BY … LIMIT` aynı sayılır.
+- `count(e)` ile `count(DISTINCT e)` farklı parmak izi verir. `>` ile `>=` farklı sayılır. `'CHN'` ile `"CHN"` aynı sayılır.
+- Etiket bağlılığı: `WHERE e.name = 'X'` (Entity) ile `WHERE c.name = 'X'` (Country) farklı parmak izi verir.
+- `MATCH (e:Entity {country: 'CHN'})` ile `MATCH (e:Entity) WHERE e.country = 'CHN'` aynı sayılır. Şemada `->` olan bir desenin `-[:COUNTRY]-` yazımı yönlü yazımla aynı sayılır.
+- Gramer dışı: `OPTIONAL MATCH`, `CALL`, `UNION`, `*1..3`, `CONTAINS`, `STARTS WITH`, `WHERE r.x = 1` (ilişki property'si), iki ayrı `MATCH`, `date(...)`, `point(...)`, `toLower(...)` içeren referansların her biri kendi nedeniyle gramer dışı işaretlenir.
+- Sonda, AE1 ve AE3 için altın yolu aday kümesinde bulur. Altın yolu içermeyen yapay bir aday kümesi oracle'ı 0 yapar.
+- Ağ yokken HF indirmesi başarısız olursa açık bir hata mesajı verilir.
+
+**Verification:** Parmak izi ve sonda testleri ağ olmadan geçer. HF alt kümesinde sonda elle çalıştırılır, yol oracle oranı U5'e geçmeden önce raporlanır.
 
 ### U7. Doküman
 
@@ -348,7 +403,7 @@ U3, U1–U2 ile paralel yapılabilir.
 
 **Requirements:** R6, R9
 
-**Dependencies:** U6
+**Dependencies:** U6, U8
 
 **Files:**
 - `graphrag_neo4j_laya/README.md` (değişir; kısa bölüm)
@@ -368,10 +423,11 @@ U3, U1–U2 ile paralel yapılabilir.
 | Risk | Etki | Azaltma |
 | --- | --- | --- |
 | Veri setindeki sorguların büyük kısmı gramer dışı (CONTAINS, tarih, OPTIONAL MATCH) | Kapsama oranı düşük görünür | Kapsama oranı ayrı raporlanır. Eşleşme yalnızca kapsanan alt kümede ölçülür. Ertelenen yapılar sıklığa göre önceliklendirilir. |
-| Sözcüksel eşleşme etiketleri kaçırır veya yanlış bağlar (eş anlamlılar, "beneficiaries" ile "BENEFITS") | Yanlış yol adayları | Eşleşme yoksa filtre uygulanmaz ve model seçer. U6 bileşen bazında hata dağılımı verir. |
+| Sözcüksel eşleşme etiketleri kaçırır veya yanlış bağlar (eş anlamlılar, `ACTED_IN`/`HAS_*` gibi adlar) | Yanlış yol adayları veya gereksiz ret | Tekil eşitlik önce, önek yedeği sıkı koşullu. U8 sondası aday üretimini U5'ten önce ölçer. U6 bileşen bazında hata dağılımı verir. |
 | String değerlerin hangi property'ye ait olduğu belirsiz | Yanlış filtre | `Example` biçim eşleşmesi, değilse `Choice` ile seçim. Geri çeviri kontrolü ve onarım. |
 | U3 taşıması mevcut planlayıcıyı bozar | R8 ihlali | Davranışı koruyan taşıma ve değişmeyen test paketi. Stop condition. |
-| Regex tabanlı parmak izi karmaşık referansları yanlış okur | Ölçüm gürültüsü | Okunamayan referans gramer dışı sayılır. Parmak izinin kendi testleri var. |
+| Regex tabanlı parmak izi karmaşık referansları yanlış okur, gramer içi alt kümeyi de kendisi belirler | Ölçüm gürültüsü, alt küme kayması | Okunamayan referans nedeniyle gramer dışı sayılır. Parmak izinin kendi testleri var. Gramer içi alt kümeden 30 örnek elle kontrol edilir. |
+| Referans sorgular bütün düğüm veya fazladan kolon döndürüyor (`RETURN e`, `RETURN e.name, e.country`) | Anlamca doğru plan eşleşmiyor sayılır | Bileşen bazında eşleşme ayrı raporlanır. Elle kontrolde sıklığı ölçülür, gerekirse parmak izi dönüş bileşenini gevşetir. |
 | HF veri seti ağ ve boyut bağımlılığı | CI'da çalışmaz | Yerel set CI için, HF alt kümesi elle çalıştırılır. |
 
 ### Assumptions
@@ -386,7 +442,7 @@ U3, U1–U2 ile paralel yapılabilir.
 - Yeni paket bağımsızdır. Router, pipeline ve `aggregate` rotası değişmez.
 - U3, `planner.py` ve `executor.py`'yi davranış değiştirmeden yeniden düzenler. `aggregate_planner_eval.py`'nin import ettiği adlar korunur.
 - `config/settings.py`'ye üç yeni ayar eklenir.
-- Yeni bir bağımlılık yoktur (`huggingface_hub` ve `pandas` zaten listede).
+- `pyarrow` yeni bağımlılık olarak `requirements.txt` ve `pyproject.toml`'a eklenir. Yalnızca ölçüm düzeneği için gerekir. `huggingface_hub` ve `pandas` zaten listede.
 
 ---
 
@@ -406,15 +462,16 @@ Komutlar `graphrag_neo4j_laya/` içinden çalıştırılır.
 | --- | --- | --- |
 | Yeni testler | `python -m pytest tests/test_text2cypher_*.py tests/test_planner_steps.py` | Hepsi geçer |
 | Regresyon | `python -m pytest` | Mevcut paket U3 öncesiyle aynı sonucu verir |
+| Aday sondası (elle, U5 öncesi) | `python -m graphrag.benchmarks.text2cypher_candidate_probe --split test --sample 300` | Yol oracle oranı raporlanır. %60 altı stop condition'dır. |
 | Yerel ölçüm | `python -m graphrag.benchmarks.text2cypher_eval --local` | AE1–AE4 eşleşir, JSON yazılır |
-| HF alt kümesi (elle) | `python -m graphrag.benchmarks.text2cypher_eval --split test --sample 300 --out benchmarks/results/text2cypher_eval.json` | Kapsanan alt kümede yapısal eşleşme raporlanır. %40 altı stop condition'dır. |
+| HF alt kümesi (elle) | `python -m graphrag.benchmarks.text2cypher_eval --split test --sample 300 --out benchmarks/results/text2cypher_eval.json` | KTD9'daki durma metriği, oracle ve bileşen oranları raporlanır. Durma metriği %40 altındaysa stop condition'dır. |
 | CLI | `python -m graphrag.retrieval.text2cypher "<AE1 sorusu>" --schema tests/fixtures/fincen_schema.txt` | AE1'e eşdeğer tek satır Cypher |
 
 ---
 
 ## Definition of Done
 
-- U1–U7 tamamlanır. Verification Contract'taki kapılar geçer.
+- U1–U8 tamamlanır. Verification Contract'taki kapılar geçer.
 - AE1–AE4 hem birim düzeyinde (ScriptedModel) hem yerel ölçümde karşılanır.
 - Mevcut planlayıcı, `aggregate` rotası ve pipeline testleri değişmeden geçer (R8).
 - HF alt kümesi ölçüm sonucu `graphrag_neo4j_laya/benchmarks/results/text2cypher_eval.json` olarak kaydedilir ve U7'de özetlenir.
