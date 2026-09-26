@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from config.settings import settings
-from graphrag.pipeline import _NO_SEEDS_RESPONSE, GraphRAGPipeline
+from graphrag.pipeline import _ABSTAIN_RESPONSE, _NO_SEEDS_RESPONSE, GraphRAGPipeline
 from graphrag.retrieval.planner.executor import AggregateResult
 from graphrag.retrieval.planner.plan import QueryPlan
 from graphrag.retrieval.post_traversal import CitationResult
@@ -159,6 +159,22 @@ class TestGlobalRoute:
         pipeline._seeds.select.return_value = []
         with patch("graphrag.pipeline.community_summary.summaries", return_value=[]):
             assert pipeline.query("What is this graph about?") == _NO_SEEDS_RESPONSE
+
+    def test_the_gate_does_not_refuse_the_graph_s_own_summary(self, pipeline, phase4):
+        # There is no better context to fall back to: the summary is the graph.
+        phase4["gate"].return_value = (False, 0.1)
+        _route(pipeline, QueryIntent.GLOBAL, 0.9)
+        with patch("graphrag.pipeline.community_summary.summaries",
+                   return_value=[{"name": "Community 1", "text": "A group of 9 entities",
+                                  "score": 1.0}]):
+            assert pipeline.query("What is this graph about?") == "LLM answer"
+        assert phase4["gate"].call_count == 0
+
+    def test_the_gate_still_judges_the_traversal_fallback(self, pipeline, phase4):
+        phase4["gate"].return_value = (False, 0.1)
+        _route(pipeline, QueryIntent.GLOBAL, 0.9)
+        with patch("graphrag.pipeline.community_summary.summaries", return_value=[]):
+            assert pipeline.query("What is this graph about?") == _ABSTAIN_RESPONSE
 
     def test_the_other_routes_do_not_summarise(self, pipeline, phase4):
         _route(pipeline, QueryIntent.LOCAL, 0.9)

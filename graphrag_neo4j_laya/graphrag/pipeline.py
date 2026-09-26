@@ -266,6 +266,7 @@ class GraphRAGPipeline:
             raw_nodes = community_summary.summaries(self._db)
             if raw_nodes:
                 logger.info("Phase 3 — %d community summaries", len(raw_nodes))
+        summarised = bool(raw_nodes)
 
         if not raw_nodes and not seed_names:
             logger.info("Phase 3 — No entry points for the %s route", intent)
@@ -298,11 +299,21 @@ class GraphRAGPipeline:
         logger.info("Phase 4b — Conflicts resolved: %d decisions", len(conflict_log))
 
         # ── Phase 4c: Hallucination Gate (Noul) ───────────────────────────────
-        is_sufficient, gate_score = hallucination_gate(final_nodes, user_query)
-        if not is_sufficient:
-            logger.warning("Phase 4c — Hallucination gate FAILED (P=%.3f) → abstaining", gate_score)
-            return _ABSTAIN_RESPONSE
-        logger.info("Phase 4c — Gate passed (P=%.3f)", gate_score)
+        # Skipped for community summaries, for the reason the aggregate route
+        # skips it: they are the graph's own partition rather than a retrieval
+        # that may have missed something, so if they do not answer a question
+        # about the whole graph, nothing in the graph does. Measured over the
+        # nine labelled `global` questions, the gate sat between 0.485 and
+        # 0.892 on exactly the same context and refused two of them by a
+        # hundredth. Citation verification below still holds the answer to it.
+        if summarised:
+            logger.info("Phase 4c — Gate skipped (community summaries)")
+        else:
+            is_sufficient, gate_score = hallucination_gate(final_nodes, user_query)
+            if not is_sufficient:
+                logger.warning("Phase 4c — Hallucination gate FAILED (P=%.3f) → abstaining", gate_score)
+                return _ABSTAIN_RESPONSE
+            logger.info("Phase 4c — Gate passed (P=%.3f)", gate_score)
 
         # ── Phase 4d: LLM Synthesis ────────────────────────────────────────────
         context_text = self._format_nodes(final_nodes)

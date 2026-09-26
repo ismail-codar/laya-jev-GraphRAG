@@ -477,7 +477,7 @@ python -m graphrag.benchmarks.aggregate_planner_eval   # tabloyu yazdırır, ben
 
 #### 7. Graph'ın bütünü hakkındaki sorular (`global` rota)
 
-"Bu bilgi grafındaki ana temalar nelerdir?" hiçbir varlık adlandırmaz; vektör aramasının bulduğu rastgele bir düğümden yürümek, kimsenin sormadığı bir soruyu cevaplar. `global` rota bunun yerine graph'ın kendi bölünmesini okur: topluluk tespiti her düğüme bir `communityId`, PageRank ise ne kadar merkezi olduğunu yazar. Her topluluk, en merkezi üyeleriyle — graph'ın onlar için tuttuğu açıklamalarla birlikte — ve içindeki ilişki tipleriyle özetlenir. Cevap bu özetlerden yazılır; yolda hiçbir şey üretilmez.
+"Bu bilgi grafındaki ana temalar nelerdir?" hiçbir varlık adlandırmaz; vektör aramasının bulduğu rastgele bir düğümden yürümek, kimsenin sormadığı bir soruyu cevaplar. `global` rota bunun yerine graph'ın kendi bölünmesini okur: topluluk tespiti her düğüme bir `communityId`, PageRank ise ne kadar merkezi olduğunu yazar. Her topluluk, en merkezi üyeleriyle — graph'ın onlar için tuttuğu açıklamalarla birlikte — ve içindeki ilişki tipleriyle özetlenir. Cevap bu özetlerden yazılır; yolda hiçbir şey üretilmez. Halüsinasyon kapısı burada atlanır — agregasyon rotasındaki gerekçeyle: özetler graph'ın kendi bölünmesidir, bir şeyi kaçırmış olabilecek bir getirme değil. Citation doğrulaması yine de cevabı onlara bağlı tutar.
 
 Rota, soru graph'ı adlandırıp bütününü sorduğunda alınır ("overview", "ana temalar", "özet") — bu da sorunun sözcüklerinden okunur. Topluluk özetleri okuma sorgusu çalıştırabilen bir backend ister (Kùzu); diğerlerinde rota eski hâline, seed'lerden sığ bir yürüyüşe düşer.
 
