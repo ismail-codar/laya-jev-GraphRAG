@@ -39,6 +39,7 @@ from graphrag.graph.base import BaseGraphClient
 from graphrag.graph.factory import get_graph_client
 from graphrag.graph.relation_schema import load_relation_schema
 from graphrag.models.llm import get_llm
+from graphrag.retrieval import community_summary
 from graphrag.retrieval.planner.executor import AggregateExecutor, AggregateResult
 from graphrag.retrieval.planner.planner import GuidedQueryPlanner
 from graphrag.retrieval.router import IntentRouter, QueryIntent
@@ -137,6 +138,31 @@ class GraphRAGPipeline:
             return "No relevant information found."
         return "\n".join(f"- {n['name']}: {n.get('text', '')}" for n in nodes)
 
+    def _traverse(
+        self, intent: QueryIntent, user_query: str, seed_names: list[str], max_depth: int,
+    ) -> list[dict[str, Any]]:
+        """Context nodes found by walking the graph out from the seeds."""
+        if intent == QueryIntent.MULTI_HOP:
+            paths: list[dict] = []
+            for seed in seed_names:
+                paths.extend(self._astar.search(seed, user_query, max_depth=max_depth))
+            return self._paths_to_nodes(paths)
+
+        if intent == QueryIntent.LOCAL:
+            edges = self._bfs.retrieve(seed_names, user_query)
+            # Seeds are the entry points the query matched; keep them as context too
+            # (after the edges, so nodes reached by an edge keep that fact in their text)
+            return self._edges_to_nodes(
+                edges + [{"source": s, "score": 1.0} for s in seed_names]
+            )
+
+        # Global, where the graph has no communities to summarise: a shallow
+        # walk from the seeds, which is what this route did everywhere before.
+        paths = []
+        for seed in seed_names:
+            paths.extend(self._astar.search(seed, user_query, max_depth=2, max_paths=3))
+        return self._paths_to_nodes(paths)
+
     # ── Aggregate route (guided query planner) ───────────────────────────────
 
     def _aggregate_executor(self) -> AggregateExecutor | None:
@@ -230,31 +256,24 @@ class GraphRAGPipeline:
             logger.info("Phase 3 — Aggregate route declined → %s", decision.fallback)
             intent = decision.fallback
 
-        if not seed_names:
+        # ── Phase 3 (global): community summaries ────────────────────────────
+        # The graph as a whole is the entry point, so this route needs no seed
+        # either: the summaries are read from the communityId and PageRank the
+        # graph already carries. A backend that cannot read them returns
+        # nothing and the route falls back to the traversal below.
+        raw_nodes: list[dict[str, Any]] = []
+        if intent == QueryIntent.GLOBAL:
+            raw_nodes = community_summary.summaries(self._db)
+            if raw_nodes:
+                logger.info("Phase 3 — %d community summaries", len(raw_nodes))
+
+        if not raw_nodes and not seed_names:
             logger.info("Phase 3 — No entry points for the %s route", intent)
             return _NO_SEEDS_RESPONSE
 
         # ── Phase 3: Graph Traversal (+ Early Termination via Noul) ──────────
-        raw_nodes: list[dict[str, Any]] = []
-        if intent == QueryIntent.MULTI_HOP:
-            all_paths: list[dict] = []
-            for seed in seed_names:
-                all_paths.extend(self._astar.search(seed, user_query, max_depth=max_depth))
-            raw_nodes = self._paths_to_nodes(all_paths)
-
-        elif intent == QueryIntent.LOCAL:
-            edges = self._bfs.retrieve(seed_names, user_query)
-            # Seeds are the entry points the query matched; keep them as context too
-            # (after the edges, so nodes reached by an edge keep that fact in their text)
-            raw_nodes = self._edges_to_nodes(
-                edges + [{"source": s, "score": 1.0} for s in seed_names]
-            )
-
-        else:  # Global
-            all_paths = []
-            for seed in seed_names:
-                all_paths.extend(self._astar.search(seed, user_query, max_depth=2, max_paths=3))
-            raw_nodes = self._paths_to_nodes(all_paths)
+        if not raw_nodes:
+            raw_nodes = self._traverse(intent, user_query, seed_names, max_depth)
 
         logger.info("Phase 3 — Retrieved %d raw nodes", len(raw_nodes))
 

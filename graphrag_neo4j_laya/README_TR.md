@@ -315,11 +315,11 @@ laya.noul(
 # Choice: tek bir seçenek anahtarı döndürür; tüm seçenekler tek bir ileri geçişte puanlanır
 laya.choice(
     "User question: How is Newton's work connected to Einstein's theory of gravity?",
-    "Which graph retrieval strategy should be used to answer this question?",
+    "What does the question ask about?",
     {
-        "local":     "The question asks about one specific fact of one entity.",
-        "multi_hop": "The question asks how two or more entities are connected, requiring a chain of facts.",
-        "global":    "The question asks for a broad summary or overview of a whole topic.",
+        "local":     "The answer is one fact about one named entity.",
+        "multi_hop": "The answer is the chain of relations between two named entities.",
+        "global":    "The answer is a summary of the graph as a whole.",
     },
 )   # → "multi_hop"
 
@@ -469,10 +469,23 @@ if result:
     print(result.answer)        # şablon cevap
 ```
 
-Planlayıcıyı etiketli soru setiyle (`examples/data/aggregate_eval.json`, 33 soru) gerçek Laya modeliyle ölçün:
+Planlayıcıyı etiketli soru setiyle (`examples/data/aggregate_eval.json`, 40 soru) gerçek Laya modeliyle ölçün:
 
 ```bash
 python -m graphrag.benchmarks.aggregate_planner_eval   # tabloyu yazdırır, benchmarks/results/aggregate_planner_eval.json dosyasına yazar
+```
+
+#### 7. Graph'ın bütünü hakkındaki sorular (`global` rota)
+
+"Bu bilgi grafındaki ana temalar nelerdir?" hiçbir varlık adlandırmaz; vektör aramasının bulduğu rastgele bir düğümden yürümek, kimsenin sormadığı bir soruyu cevaplar. `global` rota bunun yerine graph'ın kendi bölünmesini okur: topluluk tespiti her düğüme bir `communityId`, PageRank ise ne kadar merkezi olduğunu yazar. Her topluluk, en merkezi üyeleriyle — graph'ın onlar için tuttuğu açıklamalarla birlikte — ve içindeki ilişki tipleriyle özetlenir. Cevap bu özetlerden yazılır; yolda hiçbir şey üretilmez.
+
+Rota, soru graph'ı adlandırıp bütününü sorduğunda alınır ("overview", "ana temalar", "özet") — bu da sorunun sözcüklerinden okunur. Topluluk özetleri okuma sorgusu çalıştırabilen bir backend ister (Kùzu); diğerlerinde rota eski hâline, seed'lerden sığ bir yürüyüşe düşer.
+
+```bash
+# .env
+GLOBAL_MAX_COMMUNITIES=8          # özetlenecek topluluk sayısı, büyükten küçüğe
+GLOBAL_MEMBERS_PER_COMMUNITY=8    # her özette adı geçecek üye sayısı
+GLOBAL_DESCRIBED_MEMBERS=3        # bunların kaçı açıklamasıyla birlikte anılsın
 ```
 
 ### Laya neyi yargılayabilir, neyi yargılayamaz
@@ -518,6 +531,7 @@ graphrag_neo4j_laya/
 │   │   └── community.py          # Leiden topluluk tespiti
 │   ├── retrieval/                # Faz 2-4: sorgu pipeline'ı
 │   │   ├── router.py             # Choice: niyet yönlendirme
+│   │   ├── community_summary.py  # `global` rota: graph'tan okunan topluluklar
 │   │   ├── seed_selector.py      # Score: seed doğrulama
 │   │   ├── post_traversal.py     # Score/Choice/Noul: son işleme
 │   │   └── traversal/

@@ -317,11 +317,11 @@ laya.noul(
 # Choice: returns one option key; all options are scored in a single forward pass
 laya.choice(
     "User question: How is Newton's work connected to Einstein's theory of gravity?",
-    "Which graph retrieval strategy should be used to answer this question?",
+    "What does the question ask about?",
     {
-        "local":     "The question asks about one specific fact of one entity.",
-        "multi_hop": "The question asks how two or more entities are connected, requiring a chain of facts.",
-        "global":    "The question asks for a broad summary or overview of a whole topic.",
+        "local":     "The answer is one fact about one named entity.",
+        "multi_hop": "The answer is the chain of relations between two named entities.",
+        "global":    "The answer is a summary of the graph as a whole.",
     },
 )   # → "multi_hop"
 
@@ -467,10 +467,23 @@ if result:
     print(result.answer)        # template answer
 ```
 
-Measure the planner on the labelled question set (`examples/data/aggregate_eval.json`, 33 questions) with the real Laya model:
+Measure the planner on the labelled question set (`examples/data/aggregate_eval.json`, 40 questions) with the real Laya model:
 
 ```bash
 python -m graphrag.benchmarks.aggregate_planner_eval   # prints a table, writes benchmarks/results/aggregate_planner_eval.json
+```
+
+#### 7. Questions about the whole graph (`global` route)
+
+"What are the main themes of this knowledge graph?" names no entity to start from, so walking out from whatever a vector search matched answers a question nobody asked. The `global` route reads the graph's own partition instead: community detection writes a `communityId` on every node and PageRank writes how central each one is, so each community is summarised as its most central members — with the graph's own description of them — and the relation types that hold it together. Those summaries are the context the answer is written from; nothing is generated on the way.
+
+The route is taken when the question names the graph and asks about the whole of it ("overview", "main themes", "özet"), which is read from its words. Community summaries need a backend that can run a read query (Kùzu); elsewhere the route falls back to its earlier shallow walk from the seeds.
+
+```bash
+# .env
+GLOBAL_MAX_COMMUNITIES=8          # communities summarised, largest first
+GLOBAL_MEMBERS_PER_COMMUNITY=8    # members named in each summary
+GLOBAL_DESCRIBED_MEMBERS=3        # of those, how many are quoted with their description
 ```
 
 ### What Laya can and can't judge
@@ -509,6 +522,7 @@ graphrag_neo4j_laya/
 │   │   └── community.py          # Leiden community detection
 │   ├── retrieval/                # Phases 2-4: query pipeline
 │   │   ├── router.py             # Choice: intent routing
+│   │   ├── community_summary.py  # `global` route: communities read from the graph
 │   │   ├── seed_selector.py      # Score: seed validation
 │   │   ├── post_traversal.py     # Score/Choice/Noul: post-processing
 │   │   └── traversal/

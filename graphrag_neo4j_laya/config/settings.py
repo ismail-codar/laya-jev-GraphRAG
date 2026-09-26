@@ -134,6 +134,20 @@ class Settings(BaseSettings):
         description="Final number of seed nodes passed to traversal",
     )
 
+    # ── Global route (community summaries) ───────────────────────────────────
+    global_max_communities: int = Field(
+        8, gt=0, description="Communities summarised for the 'global' route, largest first",
+    )
+    global_members_per_community: int = Field(
+        8, gt=0, description="Most central members named in each community summary",
+    )
+    global_described_members: int = Field(
+        3, ge=0, description="Members of each community quoted with the graph's description of them",
+    )
+    global_scan_limit: int = Field(
+        5000, gt=0, description="Most rows read from the graph when building community summaries",
+    )
+
     # ── Guided query planner (aggregate route) ───────────────────────────────
     aggregate_route_enabled: bool = Field(
         True,

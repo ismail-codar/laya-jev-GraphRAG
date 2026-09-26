@@ -134,6 +134,39 @@ class TestWithoutSeeds:
         assert pipeline._astar.search.call_count == 0
 
 
+class TestGlobalRoute:
+    """The graph as a whole is the entry point, so its communities are it."""
+
+    def test_the_summaries_are_the_context(self, pipeline, phase4):
+        _route(pipeline, QueryIntent.GLOBAL, 0.9)
+        pipeline._seeds.select.return_value = []
+        with patch("graphrag.pipeline.community_summary.summaries",
+                   return_value=[{"name": "Community 1", "text": "A group of 9 entities",
+                                  "score": 1.0}]) as summaries:
+            assert pipeline.query("What are the main themes of this knowledge graph?") == "LLM answer"
+        assert summaries.call_count == 1
+        assert pipeline._astar.search.call_count == 0
+        assert "Community 1" in pipeline._llm.generate.call_args.args[0]
+
+    def test_a_graph_without_communities_walks_from_the_seeds(self, pipeline, phase4):
+        _route(pipeline, QueryIntent.GLOBAL, 0.9)
+        with patch("graphrag.pipeline.community_summary.summaries", return_value=[]):
+            assert pipeline.query("What are the main themes of this knowledge graph?") == "LLM answer"
+        assert pipeline._astar.search.call_count == 1
+
+    def test_no_communities_and_no_seeds_says_so(self, pipeline, phase4):
+        _route(pipeline, QueryIntent.GLOBAL, 0.9)
+        pipeline._seeds.select.return_value = []
+        with patch("graphrag.pipeline.community_summary.summaries", return_value=[]):
+            assert pipeline.query("What is this graph about?") == _NO_SEEDS_RESPONSE
+
+    def test_the_other_routes_do_not_summarise(self, pipeline, phase4):
+        _route(pipeline, QueryIntent.LOCAL, 0.9)
+        with patch("graphrag.pipeline.community_summary.summaries") as summaries:
+            pipeline.query("Where was Albert Einstein born?")
+        assert summaries.call_count == 0
+
+
 class TestQueryAggregate:
     def test_works_with_flag_off(self, pipeline, monkeypatch):
         monkeypatch.setattr(settings, "aggregate_route_enabled", False)
