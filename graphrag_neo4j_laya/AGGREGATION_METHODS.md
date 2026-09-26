@@ -782,6 +782,7 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 - **`stop`'u anchor'lı planların hop0'ında sunmamak ölçümdeki en büyük kazanç.** Sıfır hop'luk bir anchor planı zaten anchor'ın kendisini döndürüyor, yani hiçbir agregasyon sorusunu cevaplayamıyor; setteki sıfır hop'lu altın planların hepsi de anchor'sız. Kısıt konunca **hop tipi %8,3 → %37,5, yön %8,3 → %50,0, durma %12,5 → %54,2**, anlamsal filtre %70,8 → %79,2. Hiçbir adım gerilemedi. Tam plan eşleşmesi ilk kez sıfırdan çıktı (%12,5; s01, s09, s10) ve sonuç eşleşmesi ikiye katlandı — üstelik artık 4 isabetin 3'ü tam doğru plandan geliyor, önceki 2 isabetin ikisi de tesadüftü.
 - **Hop seçimi hâlâ ölçümün zayıf halkası.** Yön %50,0, bayrak hedefi %90. İki hop'lu dört sorunun hiçbiri tam tutmuyor.
 - **KTD5 doğrulandı.** Doğru plan çıkmaya başlayınca güven ayırma gücü ilk kez ölçülebildi: en zayıf adım %87,3, adım olasılıklarının çarpımı %77,8. Yani "plan güveni çarpım değil, en zayıf adımdır" kararı ölçümle destekleniyor.
+- **Hop adımını seçenek başına `Noul`'a çevirmek işe yaramadı (denendi, geri alındı).** Çok yönlü tek `Choice` yerine her hamle için ayrı bir evet/hayır cümlesi soruldu ("To answer the question, should the query take this step? Step to entities it has a BORN_IN relation (born in a place) to."), hepsi tek `ask_batch` çağrısında. Sonuç her yerde geriledi: hop tipi %37,5 → %12,5, yön %50,0 → %20,8, durma %54,2 → %20,8, filtre %83,3 → %54,2. Tam plan eşleşmesi 3 sorudan 0'a düştü, hiçbir soru kazanılmadı. Üstelik plan kurma süresi 0,95 sn'den 5,26 sn'ye çıktı: `ask_batch` bu Laya sürümünde tek forward pass gibi davranmıyor, maliyet seçenek sayısıyla artıyor (KTD6'nın dayandığı varsayım bu ölçümde tutmuyor). Not: bu tek bir ifadeyi ölçer, `Noul` fikrinin tamamını değil — ama gecikme maliyeti ifadeden bağımsız.
 - **Geri çeviri kontrolü zayıf bir ayırıcı.** Doğru planların yarısını reddediyor, yanlışların üçte birini geçiriyor. Onarım adımı bu yüzden az işe yarıyor.
 - **İşlem, filtre ve `HAVING` adımları görece iyi**, ama bu adımların çoğu soruda "yok" cevabı bekleniyor; yüksek oran kısmen bundan geliyor.
 - **`collect` seçeneğine sıra gelmedi.** Yeni `g07` sorusunda ("Her varlık hangi ilişki tiplerini kullanıyor?") Laya işlem adımında `group` yerine `list` seçti; `list` planlarında şekil adımı hiç çalışmadığı için metrik `Choice`'ı — dolayısıyla `collect` seçeneğini — görmedi. Ardından 3 hop'luk anlamsız bir yol kurdu (`RELATED_TO:in`, `RELATED_TO:out`, `EXTENDS:in`), plan güveni 0,17. Yani yeni metrik ölçülebilmiş değil: önündeki işlem adımı tıkalı.
@@ -790,7 +791,6 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 
 ### Sonraki denemeler (ölçülmedi)
 
-- Hop adımında `Choice` yerine seçenek başına `Noul` sormak ve ilişki açıklamasını yönle birlikte cümle olarak vermek.
 - İşlem adımını sağlamlaştırmak: `g07`'de `group` yerine `list` seçildiği için metrik `Choice`'ına — dolayısıyla `collect` seçeneğine — hiç sıra gelmiyor.
 - Aynı düzenekle Jev backend'ini ölçmek (`DECISION_MODEL_BACKEND=jev`).
 
