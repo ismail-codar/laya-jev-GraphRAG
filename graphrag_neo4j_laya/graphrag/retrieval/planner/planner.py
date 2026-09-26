@@ -37,8 +37,6 @@ _OPERATION_OPTIONS = {
     "group": "The question asks for a breakdown: a number per type, per entity or per group.",
 }
 _HOP_INSTRUCTION = "Which next step brings this graph query closer to answering the question?"
-_EXCLUDE_INSTRUCTION = "Does the question ask for entities other than the start entity itself?"
-_NUMERIC_FILTER_INSTRUCTION = "Does the question keep only entities whose numeric value is above or below a number?"
 _HAVING_INSTRUCTION = "Does the question keep only groups whose count or total is above or below a number?"
 _COMPARISON_OPTIONS = {
     ">": "greater than", ">=": "at least", "<": "less than", "<=": "at most", "=": "exactly equal to",
@@ -238,19 +236,38 @@ class _Planning:
             self.plan.hops.append(Hop(None if rel_type == "any" else rel_type, direction))
 
     def filters(self, numbers: list[int | float]) -> None:
-        target = self.plan.target
-        if self.plan.start and len(self.plan.hops) >= 2 and self.yes("exclude_start", _EXCLUDE_INSTRUCTION):
-            self.plan.filters.append(Filter(FieldRef(target, "name"), "!=", self.plan.start))
-        if not numbers or not self.yes("filter_numeric", _NUMERIC_FILTER_INSTRUCTION):
+        # A walk of two or more steps comes back through the entity it left:
+        # every two-hop question of the labelled set asks for the others
+        # ("how many *others* developed something Newton is connected to"),
+        # and none of them counts the start entity as part of its answer.
+        # Asked as a Noul, the model kept it in half of them.
+        if self.plan.start and len(self.plan.hops) >= 2:
+            self.forced("exclude_start", "yes")
+            self.plan.filters.append(
+                Filter(FieldRef(self.plan.target, "name"), "!=", self.plan.start))
+        # A number belongs to a node's own value only where the question names
+        # one of the two a node carries. Otherwise it is the top-k of a
+        # ranking ("en çok giden ilişkisi olan **2** varlık") or a threshold
+        # on a group ("**1**'den fazla geçen"), and the shape step reads it
+        # out of the same wording. Asked as a Noul, the model spent the
+        # number here in both, and filtered the community by a top-k.
+        # A ranking spends its number on the top-k ("PageRank'ı en yüksek **3**
+        # varlık"), even when it names the field it ranks by.
+        field = None if self.plan.operation == "rank" else candidates.numeric_field_named(self.question)
+        if not numbers or not field:
+            self.forced("filter_numeric", "no")
             return
-        fields = {
-            f"{v}.{f}": f"the {f} of {'the start entity' if v == 'v0' else 'the step-' + v[1:] + ' entity'}"
-            for v, f in candidates.numeric_field_candidates(self.plan)
-        }
-        var, fld = self.choose("filter_field", "Which value does the question compare with a number?", fields).split(".")
-        op = self.choose("filter_op", "How is the value compared with the number?", _COMPARISON_OPTIONS)
-        value = self._number("filter_value", numbers)
-        self.plan.filters.append(Filter(FieldRef(var, fld), op, value))
+        self.forced("filter_numeric", "yes")
+        entities = {v: _which_entity(v, self.plan) for v in candidates.node_vars(self.plan)}
+        var = (self.forced("filter_field", next(iter(entities))) if len(entities) == 1
+               else self.choose("filter_field",
+                                f"Whose {field} does the question compare with a number?", entities))
+        said_op = candidates.comparison_from_wording(self.question)
+        op = (self.forced("filter_op", said_op) if said_op
+              else self.choose("filter_op", "How is the value compared with the number?",
+                               _COMPARISON_OPTIONS))
+        self.plan.filters.append(Filter(FieldRef(var, field), op,
+                                        self._number("filter_value", numbers)))
 
     def shape(self, numbers: list[int | float]) -> None:
         if self.plan.operation not in ("group", "rank"):

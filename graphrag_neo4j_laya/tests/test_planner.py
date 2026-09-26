@@ -377,7 +377,7 @@ class TestHopLoop:
 
 class TestFiltersAndShape:
     def test_numeric_filter_uses_numbers_from_question(self, science_graph):
-        model = ScriptedModel(choices=["group", "any:out", "stop", "v1.pagerank", ">", "count"],
+        model = ScriptedModel(choices=["group", "any:out", "stop", "v1", ">", "count"],
                               nouls=[0.9])
         result = _plan(science_graph, model, "PageRank'ı 0,1'den büyük hedeflere giden kenarlar, tipe göre", [])
         assert result.plan.filters == [Filter(FieldRef("v1", "pagerank"), ">", 0.1)]
@@ -386,7 +386,23 @@ class TestFiltersAndShape:
         model = ScriptedModel(choices=["count", "DEVELOPED:in"])
         result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus"])
         assert result.plan.filters == []
-        assert not any(t.step.startswith("filter") for t in result.trace)
+        # The step still appears in the trace, but it costs nothing: with no
+        # number and no field named, the answer is not the model's to give.
+        assert all(t.forced for t in result.trace if t.step.startswith("filter"))
+
+    def test_a_number_without_a_field_is_not_a_filter(self, science_graph):
+        # "1'den fazla" compares the size of a group with a number; no node
+        # carries a value the question could mean.
+        model = ScriptedModel(choices=["any:out", "stop"])
+        result = _plan(science_graph, model, "Graph'ta 1'den fazla geçen ilişki türleri hangileri?", [])
+        assert result.plan.filters == []
+
+    def test_a_ranking_spends_its_number_on_the_top_k(self, science_graph):
+        # The question names PageRank, but its number is the top-k.
+        model = ScriptedModel(choices=["rank", "max:v0.pagerank"], nouls=[0.1])
+        result = _plan(science_graph, model, "PageRank'ı en yüksek 3 varlık hangisi?", [])
+        assert result.plan.filters == []
+        assert result.plan.limit == 3
 
     def test_rank_uses_small_number_as_limit(self, science_graph):
         model = ScriptedModel(choices=["rank", "any:out", "stop"], nouls=[0.1])

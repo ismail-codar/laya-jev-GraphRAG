@@ -120,6 +120,8 @@ Kronolojik; her satır bir commit. Ölçümler gerçek Laya, aynı 34 soru.
 | 6 | Geri dönüşü sunma (aynı tip ters yön), "başka" istisnasıyla | hop tipi → **%95,8**, yön → **%91,7**, sonuç → %41,7 |
 | 7 | Şekil: anahtar alanı ifadeden + tek `Choice`; metrik ifadeden; `HAVING` eşikten | anahtar/metrik/`HAVING` → **%100**, sonuç → %66,7 |
 | 8 | Anlamsal filtre: yalnız sorunun andığı tür, hop'un ima ettiği düşülerek | anlamsal %70,8 → **%95,8**, sonuç → **%91,7**, tam plan → %75,0 |
+| 9 | Filtre: iki+ hop'ta başlangıç varlığı kodda hariç tutulur | filtre %83,3 → %87,5, tam plan → %79,2 |
+| 10 | Filtre: sayısal filtre yalnız soru PageRank/topluluk anıyorsa (ve `rank` değilse) | filtre → **%95,8**, tam plan → **%87,5**, tr tam plan **%100** |
 
 ### Çürütülen varsayımlar — tekrar denemeyin
 
@@ -133,6 +135,9 @@ Kronolojik; her satır bir commit. Ölçümler gerçek Laya, aynı 34 soru.
 - **Metrik `Choice`'ı bir tercihe saplanıyor.** PageRank seçenekleri açıkken onları, kapalıyken
   altı grubun altısına da `count_distinct` seçti.
 - **Geri dönüş kuralını kayıtsız şartsız koymak.** AE3'ü kırar; istisna ifadeden okunmalı.
+- **Sorudaki sayıyı düğümün bir alanına bağlatmak.** `Noul` "evet" deyip model rastgele alan
+  seçiyordu (`v0.communityId < 2`, `v0.pagerank < 1`). Düğümün taşıdığı sayı iki tanedir; soru
+  onları anmıyorsa sayı şekil adımının (`limit` ya da eşik).
 
 ### Doğrulanan
 
@@ -146,18 +151,16 @@ Kronolojik; her satır bir commit. Ölçümler gerçek Laya, aynı 34 soru.
 
 ## 5. Sıradaki turlar (ölçülmedi)
 
-1. **Başlangıç varlığını hariç tutma filtresi** — %83,3, kalan tek adım öbeği (`g03`, `g06`,
-   `t01`, `t04`). İki ve daha fazla hop'ta `Noul` ile soruluyor.
-2. **`t02`** — "the theory Einstein discovered is connected to": anılan tür cevabı değil yolun
+1. **`t02`** — "the theory Einstein discovered is connected to": anılan tür cevabı değil yolun
    ortasındaki varlığı tarif ediyor; koda bağlanamayan iki anlamsal sorudan biri.
-3. **`t04`** — alt sınır kesin sayı olarak uygulanmadığı için üçüncü bir hop atıyor. "İlişkiye
+2. **`t04`** — alt sınır kesin sayı olarak uygulanmadığı için üçüncü bir hop atıyor. "İlişkiye
    iki atıf = tam iki adım" denenebilir.
-4. **`g02`** — tek kalan yön hatası (`any:in`, altın `any:out`).
-5. **Router** — tutmayan tek bayrak hedefi burada: agregasyon sorularının yalnız %37,5'i bu
+3. **`g02`** — tek kalan yön hatası (`any:in`, altın `any:out`).
+4. **Router** — tutmayan tek bayrak hedefi burada: agregasyon sorularının yalnız %37,5'i bu
    rotaya giriyor, yanlış yönlendirme %10. Planlayıcı artık doğru plan kuruyor; darboğaz
    yönlendirme.
-6. **Jev backend'ini aynı düzenekle ölçmek** (`DECISION_MODEL_BACKEND=jev`).
-7. **Geri çeviri kontrolü** — doğru planların yarısını reddediyor, yanlışların üçte birini
+5. **Jev backend'ini aynı düzenekle ölçmek** (`DECISION_MODEL_BACKEND=jev`).
+6. **Geri çeviri kontrolü** — doğru planların yarısını reddediyor, yanlışların üçte birini
    geçiriyor (%50 / %66,7). Onarım adımı bu yüzden az işe yarıyor.
 
 ---

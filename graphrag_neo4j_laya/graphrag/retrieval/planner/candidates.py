@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 
 from .describe import describe_hops
-from .plan import NODE_FIELDS, Hop, QueryPlan
+from .plan import Hop, QueryPlan
 
 # "0,1" (Turkish decimal comma) and "0.1" both mean 0.1; "1,000"-style
 # thousands separators are not expected in questions.
@@ -352,6 +352,19 @@ def asks_about_importance(text: str) -> bool:
     return bool(_IMPORTANCE_RE.search(text))
 
 
+# The only numbers a node carries are its PageRank and the community it was
+# put in, so a filter on a node's own number is a question about one of them.
+_NUMERIC_FIELD_WORDS = (("pagerank", _IMPORTANCE_RE), ("communityId", _FIELD_WORDS[1][1]))
+
+
+def numeric_field_named(text: str) -> str | None:
+    """The numeric node field the question compares with a number, if it names one."""
+    for field, pattern in _NUMERIC_FIELD_WORDS:
+        if pattern.search(text):
+            return field
+    return None
+
+
 def node_vars(plan: QueryPlan) -> list[str]:
     return [f"v{i}" for i in range(len(plan.hops) + 1)]
 
@@ -365,10 +378,6 @@ def group_key_candidates(plan: QueryPlan) -> list[tuple[str, str]]:
     keys = [(v, f) for v in node_vars(plan) for f in ("name", "communityId")]
     keys += [(e, "type") for e in edge_vars(plan)]
     return keys
-
-
-def numeric_field_candidates(plan: QueryPlan) -> list[tuple[str, str]]:
-    return [(v, f) for v in node_vars(plan) for f in NODE_FIELDS if f != "name"]
 
 
 _DISTINCT_RE = re.compile(r"(?<!\w)(distinct|different|unique|farklı|ayrı|değişik)(?!\w)",
