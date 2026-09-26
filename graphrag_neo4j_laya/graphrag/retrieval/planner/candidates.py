@@ -91,7 +91,7 @@ _FUNCTION_WORDS = frozenset(("was", "were", "is", "are", "or", "and", "of", "in"
                              "upon", "to", "first", "other"))
 
 
-def relation_words(description: str) -> frozenset[str]:
+def relation_words_of(description: str) -> frozenset[str]:
     """The words of *description* that name the relation rather than its object."""
     words = []
     for word in re.findall(r"[a-z]+", description.lower()):
@@ -102,24 +102,54 @@ def relation_words(description: str) -> frozenset[str]:
     return frozenset(words)
 
 
-def names_one_relation(text: str, relation_schema: dict[str, str]) -> str | None:
+def named_relations(
+    text: str,
+    relation_schema: dict[str, str],
+    relation_words: dict[str, tuple[str, ...]] | None = None,
+) -> list[str]:
+    """
+    Every relation type *text* names.
+
+    A type is named either by a word of its description, or by one of the
+    words the schema lists for it. A listed word matches a question word that
+    starts with it, which is how a Turkish suffix is covered ("yazdı" matches
+    "yazdığı"); a description word has to match whole, since English inflects
+    little and a prefix would make "born" out of "borne" and "place".
+    """
+    said = {w.lower() for w in re.findall(r"[^\W\d_]+", text, re.UNICODE)}
+    listed = relation_words or {}
+    named = []
+    for rel_type, description in relation_schema.items():
+        stems = listed.get(rel_type, ())
+        if relation_words_of(description) & said or any(w.startswith(s) for s in stems for w in said):
+            named.append(rel_type)
+    return named
+
+
+def names_one_relation(
+    text: str,
+    relation_schema: dict[str, str],
+    relation_words: dict[str, tuple[str, ...]] | None = None,
+) -> str | None:
     """
     The single relation type *text* names, if it names exactly one.
 
     Naming two ("the theory Einstein discovered") says nothing about which
     one the next hop is, so the model keeps the choice.
     """
-    said = {w.lower() for w in re.findall(r"[^\W\d_]+", text, re.UNICODE)}
-    named = [t for t, description in relation_schema.items() if relation_words(description) & said]
+    named = named_relations(text, relation_schema, relation_words)
     return named[0] if len(named) == 1 else None
 
 
-def mentions_a_relation(text: str, relation_schema: dict[str, str] | None = None) -> bool:
+def mentions_a_relation(
+    text: str,
+    relation_schema: dict[str, str] | None = None,
+    relation_words: dict[str, tuple[str, ...]] | None = None,
+) -> bool:
     """Does the question talk about a relation between entities at all?"""
     if _RELATION_WORD_RE.search(text):
         return True
-    said = {w.lower() for w in re.findall(r"[^\W\d_]+", text, re.UNICODE)}
-    return any(relation_words(d) & said for d in (relation_schema or {}).values())
+    return bool(named_relations(text, relation_schema or {}, relation_words))
 
 
 def only_this_relation(options: dict[str, str], rel_type: str) -> dict[str, str]:

@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any, Callable
 from unittest.mock import patch
 
+from graphrag.graph.relation_schema import RelationSchema, parse_relation_schema
 from graphrag.retrieval.planner.describe import describe_plan
 from graphrag.retrieval.planner.plan import FieldRef, Filter, Having, Hop, Order, QueryPlan, validate_plan
 from graphrag.retrieval.planner.planner import _parse_metric
@@ -129,7 +130,7 @@ def validate_item(item: dict[str, Any]) -> None:
         raise ValueError(f"{item['id']}: a semantic plan needs a known kind and 'members'")
 
 
-def build_graph(db, data: dict[str, Any], data_path: Path = DEFAULT_DATA) -> dict[str, str]:
+def build_graph(db, data: dict[str, Any], data_path: Path = DEFAULT_DATA) -> RelationSchema:
     """Load the question set's graph into *db*; returns the relation schema."""
     source = json.loads((Path(data_path).parent / data["entities_from"]).read_text(encoding="utf-8"))
     db.create_schema()
@@ -139,7 +140,7 @@ def build_graph(db, data: dict[str, Any], data_path: Path = DEFAULT_DATA) -> dic
         db.upsert_edge(s, t, rel_type)
     db.run_pagerank()
     db.run_community_detection()
-    return source.get("schema", {})
+    return parse_relation_schema(source.get("schema", {}))
 
 
 # ── Comparison ───────────────────────────────────────────────────────────────
@@ -431,13 +432,13 @@ def main(argv: list[str] | None = None) -> int:
         db = KuzuClient(db_path=str(Path(tmp) / "eval.kuzu"))
         try:
             schema = build_graph(db, data, args.data)
-            planner = GuidedQueryPlanner(db, schema)
+            planner = GuidedQueryPlanner(db, schema.descriptions, schema.words)
             records = evaluate(
                 db, data["items"],
                 router=IntentRouter(),
                 planner=planner,
                 check=AggregateExecutor(db, planner).check,
-                relation_schema=schema,
+                relation_schema=schema.descriptions,
                 route_threshold=settings.aggregate_route_min_confidence,
                 counter=counter,
             )

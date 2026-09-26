@@ -248,6 +248,36 @@ class TestHopLoop:
         assert candidates.names_one_relation("Which idea is it?", {"DEVELOPED": "developed an idea"}) is None
         assert candidates.names_one_relation("Who developed it?", {"DEVELOPED": "developed an idea"}) == "DEVELOPED"
 
+    def test_a_schema_word_names_the_relation_in_another_language(self, science_graph):
+        # The description is English, so a Turkish question names nothing
+        # until the schema lists the words that name the relation.
+        schema, words = {"DEVELOPED": "developed an idea"}, {"DEVELOPED": ("geliştir",)}
+        assert candidates.names_one_relation("Calculus'u kim geliştirdi?", schema) is None
+        assert candidates.names_one_relation("Calculus'u kim geliştirdi?", schema, words) == "DEVELOPED"
+
+    def test_a_schema_word_matches_a_suffixed_form(self, science_graph):
+        schema, words = {"AUTHORED": "wrote a work"}, {"AUTHORED": ("yazdı",)}
+        for question in ("Newton ne yazdı?", "Newton'un yazdığı eser hangisi?"):
+            assert candidates.names_one_relation(question, schema, words) == "AUTHORED"
+        # A shorter word than the stem is not a prefix of it.
+        assert candidates.names_one_relation("Newton ne yazar?", schema, words) is None
+
+    def test_a_schema_word_reaches_hop0(self, science_graph):
+        model = ScriptedModel(choices=["list", "DEVELOPED:in", "stop"])
+        result = _plan(science_graph, model, "Calculus'u kim geliştirdi?", [],
+                       relation_words={"DEVELOPED": ("geliştir",)})
+        assert result.plan.hops == [Hop("DEVELOPED", "in")]
+        assert set(model.choice_calls[1]) == {"DEVELOPED:out", "DEVELOPED:in"}
+
+    def test_a_schema_word_counts_as_mentioning_a_relation(self, science_graph):
+        # Without it the question names no relation at all and stops at hop0.
+        model = ScriptedModel(choices=["count", "DEVELOPED:out", "stop"])
+        result = _plan(science_graph, model, "Kaç şey geliştirilmiş?", [],
+                       relation_words={"DEVELOPED": ("geliştir",)})
+        assert result.plan.hops == [Hop("DEVELOPED", "out")]
+        assert _plan(science_graph, ScriptedModel(choices=["count"]),
+                     "Kaç şey geliştirilmiş?", []).plan.hops == []
+
     def test_two_named_relations_leave_the_choice_alone(self, science_graph):
         schema = {"DEVELOPED": "developed an idea", "AUTHORED": "wrote or authored a work"}
         assert candidates.names_one_relation("Who developed and wrote something?", schema) is None

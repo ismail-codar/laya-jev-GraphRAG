@@ -192,7 +192,7 @@ class _Planning:
                 # anchor itself, which answers no aggregate question, and a
                 # question that does name a relation is asking about it.
                 if not self.plan.start and not candidates.mentions_a_relation(
-                        self.question, self.p.relation_schema):
+                        self.question, self.p.relation_schema, self.p.relation_words):
                     self.forced(step, "stop")
                     return
                 options.pop("stop")
@@ -203,7 +203,8 @@ class _Planning:
                 # read out of the schema's own descriptions, so a schema
                 # written in another language than the question matches
                 # nothing and the model keeps the whole choice.
-                named = candidates.names_one_relation(self.question, self.p.relation_schema)
+                named = candidates.names_one_relation(self.question, self.p.relation_schema,
+                                                      self.p.relation_words)
                 if named:
                     options = candidates.only_this_relation(options, named)
             # One option is not a choice, and asking would let a meaningless
@@ -319,11 +320,13 @@ class GuidedQueryPlanner:
         self,
         db,
         relation_schema: dict[str, str] | None = None,
+        relation_words: dict[str, tuple[str, ...]] | None = None,
         max_hops: int | None = None,
         row_limit: int | None = None,
     ) -> None:
         self.db = db
         self.relation_schema = relation_schema or {}
+        self.relation_words = relation_words or {}
         self.max_hops = max_hops if max_hops is not None else settings.aggregate_max_hops
         self.row_limit = row_limit if row_limit is not None else settings.aggregate_row_limit
 

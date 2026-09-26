@@ -747,10 +747,21 @@ Yöntem 1–3'teki sabit şablonlar yerine sorguyu **adım adım** kurar. Her ad
      `any` ve diğer tipler seçeneklerden çıkar, yön modele kalır. İki tip birden anılıyorsa
      hangisinin önce geldiği belli değildir, seçenekler olduğu gibi kalır.
 
-   Bir tipin adı, şemanın kendi açıklamasından okunur: açıklama bir eylem öbeği olduğu için
-   ("wrote, published or authored a work") nesnesinden önceki sözcükler o ilişkinin adıdır.
-   Nesneyi de saysaydık "list every place in the graph" BORN_IN sorusu olurdu ("was born in a
-   place"). Şema soruyla aynı dilde değilse hiçbir sözcük tutmaz ve karar modele kalır.
+   Bir tipin adı iki yerden okunur. Birincisi şemanın kendi açıklaması: açıklama bir eylem öbeği
+   olduğu için ("wrote, published or authored a work") nesnesinden önceki sözcükler o ilişkinin
+   adıdır. Nesneyi de saysaydık "list every place in the graph" BORN_IN sorusu olurdu ("was born
+   in a place"). İkincisi şemanın ilişki başına verebildiği sözcük listesi — açıklamanın dilinde
+   olmayan sorular için:
+
+   ```json
+   "AUTHORED": {"description": "wrote, published or authored a work",
+                "words": ["yazdı", "yazan", "yazar", "yazmış", "yayımla", "yayınla"]}
+   ```
+
+   Listedeki sözcük, sorudaki sözcüğün **başında** aranır; Türkçe ekler böyle karşılanıyor
+   ("yazdı" → "yazdığı"). Açıklama sözcükleri ise tam eşleşir, çünkü İngilizce az çekimleniyor ve
+   önek eşleşmesi "born"u "borne"a bağlardı. Şema yalnız açıklama da taşıyabilir (eski biçim);
+   o zaman sorunun dili açıklamanınkiyle aynı değilse karar modele kalır.
 4. Filtreler: iki ve daha fazla hop'ta başlangıç varlığını hariç tutma (`Noul`); soruda sayı varsa sayısal filtre (alan, operatör ve değer; değer sorudan regex ile çıkar).
 5. Şekil (`group` / `rank`): gruplama anahtarları tek `ask_batch` çağrısıyla, metrik `Choice` ile (`count`, `count_distinct`, düğüm `pagerank`'i üzerinde `sum`/`avg`/`min`/`max`, ve yalnız `group` planlarında adım başına `collect:e<i>.type`; liste sıralanamadığı için `rank`'e sunulmaz); `rank` için `limit` sorudaki sayıdan; soruda sayı varsa `HAVING`.
 6. Anlamsal filtre (`Choice`, kapalı liste): `none`, `person`, `theory`, `place`, `work`, `organisation`, `phenomenon`. Seçilirse Yöntem 5 çalışır: adaylar DB'den gelir, her biri `Noul` ile bantlanır (≥ 0,70 kesin, ≤ 0,30 hayır) ve kesin küme `IN` filtresi olarak plana eklenir. Sonuç `[kesin, kesin + belirsiz]` aralığıdır.
@@ -776,25 +787,26 @@ Yöntem 1–5'in yapamadığı çok adımlı yol filtreleri de bu yolla ifade ed
 
 Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `examples/data/aggregate_eval.json`, 34 soru: 10 basit, 7 gruplu / filtreli, 4 iki hop'lu, 3 anlamsal filtreli agregasyon, ve 10 agregasyon olmayan soru; 14'ü Türkçe. Seed'ler setten gelir, yani seed seçim hataları sayılara karışmaz. Laya `multilingual` checkpoint, CPU, 2026-09-25.
 
-> Aşağıdaki tablo hop adımı sağlamlaştırıldıktan sonraki ölçüm. Parantezdeki değerler bir
-> önceki ölçüm — başlangıç ve işlem adımlarının kodda olduğu, ama hop'un ilk adımdan itibaren
-> düz bir `Choice` olduğu hal.
+> Aşağıdaki tablo hop adımı sağlamlaştırıldıktan **ve** şemaya Türkçe ilişki sözcükleri
+> eklendikten sonraki ölçüm. Parantezdeki değerler, hop kurallarının konduğu ama şemanın hâlâ
+> yalnız İngilizce olduğu bir önceki ölçüm — yani parantezler sözcük listelerinin tek başına
+> etkisini gösteriyor.
 
 | Ölçüm | Sonuç | Bayrak hedefi |
 | --- | --- | --- |
 | İşlem doğruluğu | %100 — kod + `Choice` | |
 | Başlangıç doğruluğu | %100 — kod kararı | |
-| Hop tipi / yön / durma | **%75,0 / %75,0 / %79,2** (önce %37,5 / %50,0 / %54,2) | yön ≥ %90 |
-| Filtre / anahtar / metrik / `HAVING` | %75,0 / %75,0 / **%83,3** / %91,7 (önce %83,3 / %87,5 / %75,0) | |
-| Anlamsal filtre adımı | %70,8 (önce %75,0) | |
-| Tam plan eşleşmesi | **%25,0** (6 / 24 — önce %16,7) | |
-| Sonuç eşleşmesi | **%25,0** (6 / 24, hepsi tam doğru planla — önce %20,8) | ≥ %80 |
+| Hop tipi / yön / durma | **%79,2** / %75,0 / %79,2 (önce %75,0 / %75,0 / %79,2) | yön ≥ %90 |
+| Filtre / anahtar / metrik / `HAVING` | %75,0 / %75,0 / %83,3 / %91,7 (değişmedi) | |
+| Anlamsal filtre adımı | %70,8 (değişmedi) | |
+| Tam plan eşleşmesi | **%29,2** (7 / 24 — önce %25,0) | |
+| Sonuç eşleşmesi | **%33,3** (8 / 24 — önce %25,0) | ≥ %80 |
 | Agregasyon sorusunu `aggregate`'e yönlendirme | %37,5 (değişmedi) | |
 | Yanlış yönlendirme (agregasyon olmayan → `aggregate`) | %10 (1 / 10) | %0 |
 | Geri çeviri kontrolü: doğru planı geçirme / yanlış planı reddetme | %50,0 / %66,7 (değişmedi) | |
-| Min ve çarpım güveninin ayırma gücü | min %78,7 · çarpım %76,9 (önce %93,8 · %83,8) | |
-| Dil kırılımı (tam plan · sonuç) | en **%28,6 · %28,6** — tr %20,0 · %20,0 (önce en %14,3, tr %20,0 · %30,0) | |
-| Gecikme (ortalama) | yönlendirme 0,14 sn · plan 0,82 sn | |
+| Min ve çarpım güveninin ayırma gücü | min %82,4 · çarpım %81,5 (önce %78,7 · %76,9) | |
+| Dil kırılımı (tam plan · sonuç) | en %28,6 · %28,6 — tr **%30,0 · %40,0** (önce tr %20,0 · %20,0) | |
+| Gecikme (ortalama) | yönlendirme 0,17 sn · plan 0,86 sn | |
 | Soru başına çağrı | 3,6 `Choice` · 1,5 `Noul` · 0,2 `ask_batch` | |
 
 Üç bayrak hedefinin üçü de tutmadı. Router rotası kapalı kalır.
@@ -810,7 +822,8 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 - **İlk hop'un ilişki gerektirip gerektirmediği ifadeden okunuyor: hop tipi %37,5 → %66,7.** Bütün graph'tan başlayan on sorunun ilk hop'unu model üçünde doğru veriyordu. Soru hiçbir ilişkiden söz etmiyorsa ("How many theories are there in the graph?") cevap varlıkların kendisidir ve plan başlangıçta kalır; söz ediyorsa en az bir hop vardır. Kural etiketli setin on sorusunun dokuzunda altın plana uyuyor. Tek istisna `s05`: "Graph'ta kaç şey keşfedilmiş?" ilişkiyi Türkçe bir eylemle anıyor, sözcük listesi ise İngilizce — soru ilişkisiz sayılıp sıfır hop'a düşüyor (eskiden şans eseri doğru sonucu veren yanlış bir plan kuruyordu, o da gitti). Hop tipi/yön/durma altı soruda birden düzeldi (`s04`, `m01`, `g03`, `g04`, `g06`, `g07`).
 - **Soru tek bir ilişki tipini anıyorsa ilk hop odur: hop tipi %66,7 → %75,0.** `any:out` modelin varsayılan cevabı gibi davranıyordu; soru ilişkiyi adıyla andığında bile onu seçiyordu (`s02` "born in", `s06` "authored"). Tipi anan soruda `any` ve diğer tipler seçeneklerden çıkarılınca `s02`, `s06`, `s07` ve `t02`'nin ilk hop'u düzeldi; `s02` ilk kez uçtan uca doğru. Yön modele bırakıldı, çünkü aynı tip iki yönde de bulunabiliyor.
 - **İlişkinin adı şemanın kendi açıklamasından çıkıyor, elle yazılmıyor.** Açıklamalar eylem öbeği ("wrote, published or authored a work"), dolayısıyla nesnesinden önceki sözcükler ilişkinin adıdır: `AUTHORED` → wrote/published/authored, `BORN_IN` → born, `RELATED_TO` → hiçbiri ("any other relationship"). Nesne de sayılsaydı "list every place in the graph" BORN_IN sorusu olurdu. Etiketli setin 24 agregasyon sorusundan beşi tek bir tip anıyor ve dördünde altın ilk hop tam o tip; beşincisi `t04`, orada anılan tip ikinci hop'a ait — ama `t04`'ün hop'ları zaten baştan sona yanlış olduğu için ölçüm kaybı yok.
-- **Kalan hop hataları üç öbekte.** (1) Türkçe soruların ilişkiyi Türkçe bir eylemle anması (`s03` "yazdı", `s05` "keşfedilmiş", `t03` "yazdığı") — şema İngilizce olduğu için hiçbiri tutmuyor. Bu bir model değil veri eksiği: şemanın ilişki sözcüklerini sorunun dilinde de taşıması gerekir. (2) İki hop'lu sorular ilk hop'tan sonra duruyor (`t01`, `t02`, `t04`); iç cümlenin ikinci bir adım gerektirdiğini görmek ifadeden okunabilir bir şey değil. (3) `g02`'de yön ters.
+- **Şema ilişki sözcüklerini taşıyınca Türkçe de kapandı: hop tipi %75,0 → %79,2, sonuç %25,0 → %33,3.** Açıklamalar İngilizce olduğu için "kaç eser **yazdı**", "kaç şey **keşfedilmiş**", "**yazdığı** eserle" hiçbir tipi anmıyordu — model değil, veri eksiğiydi. Şema girdisi artık açıklamanın yanında o ilişkiyi adlandıran sözcükleri de taşıyabiliyor; sözcük sorudaki sözcüğün başında aranıyor, böylece Türkçe ekler tek bir kökle karşılanıyor ("yazdı" → "yazdığı"). Sözcükler ilişkinin anlamından yazıldı, sorulardan değil — ve `doğdu`/`doğum` yerine `doğ` yazılsaydı "doğrudan bağlı olduğu varlıklar" (`s08`) BORN_IN sorusu olurdu. Etiketli setin sekiz sorusu artık bir tip anıyor, yedisinde altın ilk hop tam o tip. Türkçe tam plan %20,0 → %30,0, Türkçe sonuç %20,0 → %40,0; hiçbir soru gerilemedi.
+- **Kalan hop hataları tek öbekte toplandı.** İki hop'lu dört sorunun dördü de ilk hop'tan sonra duruyor (`t01`, `t02`, `t03`, `t04`) — üçünün ilk hop'u artık doğru, eksik olan yalnız ikinci adım. İç cümlenin ikinci bir hop gerektirdiğini görmek ifadeden okunabilir bir şey değil; tek açık işaret `t01`'in "two steps away"i. Bunun dışında `g02`'de yön ters, `s05` ise doğru ilk hop'tan sonra fazladan bir hop atıyor (sonucu yine de tutuyor, ama plan yanlış).
 - **Zorlanan adım arttıkça güven ayırma gücü düştü** (min %93,8 → %78,7). Kalan `Choice`'lar tam da belirsiz olanlar; kodun aldığı adımlar 1,0 olasılıkla kayda geçtiği için güvene karışmıyor. Aynı sebeple soru başına `Choice` 3,7'den 3,6'ya, plan süresi 1,05 sn'den 0,82 sn'ye indi.
 - **Hop düzelince şekil adımı zorlaştı.** Anahtar %87,5 → %75,0, filtre %83,3 → %75,0: daha önce sıfır hop'ta kalan sorular artık bir hop attığı için gruplama anahtarı adayları çoğaldı ve model yanılıyor. Anlamsal filtre de %75,0 → %70,8 (`s06` artık gereksiz bir filtre ekliyor). Yine de tam plan %16,7 → %25,0 ve sonuç %20,8 → %25,0: artık sonuç isabetlerinin **altısı da** tam doğru plandan geliyor.
 - **KTD5 doğrulandı.** Doğru plan çıkmaya başlayınca güven ayırma gücü ilk kez ölçülebildi: en zayıf adım %87,3, adım olasılıklarının çarpımı %77,8; işlem adımından sonra %93,8'e karşı %83,8. Yani "plan güveni çarpım değil, en zayıf adımdır" kararı ölçümle destekleniyor.
@@ -818,13 +831,12 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 - **Geri çeviri kontrolü zayıf bir ayırıcı.** Doğru planların yarısını reddediyor, yanlışların üçte birini geçiriyor. Onarım adımı bu yüzden az işe yarıyor.
 - **Filtre ve `HAVING` adımları görece iyi**, ama bu adımların çoğu soruda "yok" cevabı bekleniyor; yüksek oran kısmen bundan geliyor.
 - **`collect` ilk kez seçildi, ama iki soruda da yanlış.** İşlem adımı `g07`'de ("Her varlık hangi ilişki tiplerini kullanıyor?") artık `group` verdiği için metrik `Choice`'ı — dolayısıyla `collect` seçeneğini — ilk kez gördü. Laya `g07`'de yine de `count_distinct`'i seçti; `collect`'i seçtiği iki soruda (`g01`, `g05`) ise altın metrik sayım. Yani seçenek artık ulaşılabilir ve geçerli Cypher üretiyor, ama metrik adımı onu doğru yerde kullanmıyor.
-- **Gecikme ölçümler arasında 3–4 kat oynuyor** (plan 3,8 → 0,88 → 1,24 → 0,95 → 1,05 → 0,82 sn). Kod yolu aynı; fark ölçüm anındaki makine yüküne benziyor, ayrıca araştırılmadı. Mutlak değerden çok sıralama anlamlı: plan kurma yönlendirmenin ~5 katı.
-- **Mimari beklendiği gibi çalışıyor:** bütün geçersiz hamleler yapısal olarak engelleniyor, üretilen her plan geçerli Cypher'a dönüşüyor, boş ve kesilmiş sonuçlar doğru raporlanıyor (272 birim testi).
+- **Gecikme ölçümler arasında 3–4 kat oynuyor** (plan 3,8 → 0,88 → 1,24 → 0,95 → 1,05 → 0,82 → 0,86 sn). Kod yolu aynı; fark ölçüm anındaki makine yüküne benziyor, ayrıca araştırılmadı. Mutlak değerden çok sıralama anlamlı: plan kurma yönlendirmenin ~5 katı.
+- **Mimari beklendiği gibi çalışıyor:** bütün geçersiz hamleler yapısal olarak engelleniyor, üretilen her plan geçerli Cypher'a dönüşüyor, boş ve kesilmiş sonuçlar doğru raporlanıyor (277 birim testi).
 
 ### Sonraki denemeler (ölçülmedi)
 
-- Şemanın ilişki sözcüklerini soru diliyle taşımak: kalan yedi hop hatasının üçü yalnızca şema açıklamalarının İngilizce olmasından (`s03`, `s05`, `t03`).
-- İki hop'lu sorular: dördünün de ikinci hop'u eksik. İfadeden okunabilir tek işaret `t01`'in "two steps away"i.
+- İki hop'lu sorular: dördünün de ikinci hop'u eksik, kalan tek hop öbeği bu. İfadeden okunabilir tek işaret `t01`'in "two steps away"i.
 - Metrik adımı: `collect` ile sayım arasındaki seçim iki soruda da yanlış tarafa düştü.
 - Aynı düzenekle Jev backend'ini ölçmek (`DECISION_MODEL_BACKEND=jev`).
 
@@ -833,6 +845,7 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 | Dosya | İçerik |
 | --- | --- |
 | `graphrag/graph/kuzu_client.py` | `frontier_moves`, `distinct_values`, salt okunur `run_read_query` |
+| `graphrag/graph/relation_schema.py` | İlişki açıklamaları ve ilişkiyi adlandıran sözcükler |
 | `graphrag/retrieval/planner/plan.py`, `render_kuzu.py`, `describe.py` | Tipli plan, Kùzu renderer, İngilizce açıklama |
 | `graphrag/retrieval/planner/candidates.py`, `planner.py` | Aday üretimi ve adım adım planlayıcı |
 | `graphrag/retrieval/planner/executor.py`, `facts.py`, `semantic_filter.py` | Kontrol, onarım, çalıştırma, fact ve şablon cevap, anlamsal filtre |
