@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from config.settings import settings
-from graphrag.pipeline import GraphRAGPipeline
+from graphrag.pipeline import _NO_SEEDS_RESPONSE, GraphRAGPipeline
 from graphrag.retrieval.planner.executor import AggregateResult
 from graphrag.retrieval.planner.plan import QueryPlan
 from graphrag.retrieval.post_traversal import CitationResult
@@ -108,6 +108,30 @@ class TestAggregateBranch:
         pipeline._aggregate.run.return_value = _result()
         phase4["cite"].return_value = CitationResult(is_faithful=False, noul_score=0.1, answer="")
         assert pipeline.query("q").startswith("[⚠️ UNVERIFIED]")
+
+
+class TestWithoutSeeds:
+    """A question about the whole graph has no entry point to find."""
+
+    def test_the_plan_still_runs(self, pipeline, phase4):
+        _route(pipeline, QueryIntent.AGGREGATE, 0.9)
+        pipeline._seeds.select.return_value = []
+        pipeline._aggregate.run.return_value = _result()
+        assert pipeline.query("How many theories are there in the graph?") == "14 recorded in the graph"
+        assert pipeline._aggregate.run.call_args.args == ("How many theories are there in the graph?", [])
+
+    def test_a_traversal_route_still_says_it_found_no_entry_point(self, pipeline, phase4):
+        _route(pipeline, QueryIntent.LOCAL, 0.9)
+        pipeline._seeds.select.return_value = []
+        assert pipeline.query("Where was Albert Einstein born?") == _NO_SEEDS_RESPONSE
+        assert pipeline._bfs.retrieve.call_count == 0
+
+    def test_a_declined_plan_without_seeds_does_not_traverse(self, pipeline, phase4):
+        _route(pipeline, QueryIntent.AGGREGATE, 0.9)
+        pipeline._seeds.select.return_value = []
+        pipeline._aggregate.run.return_value = None
+        assert pipeline.query("How many theories are there in the graph?") == _NO_SEEDS_RESPONSE
+        assert pipeline._astar.search.call_count == 0
 
 
 class TestQueryAggregate:

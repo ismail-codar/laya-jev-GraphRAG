@@ -839,6 +839,8 @@ Yöntem 1–3'teki sabit şablonlar yerine sorguyu **adım adım** kurar. Her ad
 
 Sonra plan (tipli bir AST, `plan.py`) parametreli Kùzu Cypher'a çevrilir. Tanımlayıcılar beyaz listeden gelir, bütün değerler parametredir. Plan çalışmadan önce soruya karşı **geri okunur**: en küçük marjlı adım ikinci seçeneğine çevrilip plan bir kez daha kurulur ve iki açıklama aynı `Noul` ile puanlanır ("Bu sorgu sorunun istediği şeyi mi döndürüyor?"); yüksek puanlı olan çalışır, eşitlikte planlayıcının kurduğu kalır. Puan bir not değil, bir karşılaştırmadır: ölçümde mutlak seviyesi planı değil soruyu izliyor, o yüzden sabit eşik doğru planların yarısını reddediyordu. Geri okuma açıklamanın parantezsiz hâliyle yapılır — ilişki tipinin şemadaki açıklaması ve cevabın yolun kaçıncı varlığı olduğu planlayıcının kendi adımlarına yarıyor, geri okumaya zarar veriyor. Planı hâlâ reddedebilen tek şey kendi güveni (en zayıf adımın olasılığı); düşükse `None` döner ve pipeline eski rotalara düşer.
 
+Rota seed gerektirmez: planlayıcı başlangıç varlığını sorunun kendisinden okur, okuyamazsa bütün graph'tan başlar — "How many theories are there in the graph?" sorusunun zaten giriş noktası yoktur. Bu yüzden pipeline'ın seed kontrolü plandan **sonra** yapılır ve yalnız gezinme rotalarını (`local`, `multi_hop`, `global`) durdurur; eskiden seed bulunamayan her soru, plan hiç kurulmadan "giriş noktası bulunamadı" cevabına düşüyordu.
+
 Bu, Pangu'nun (Gu ve ark., 2023) "üretme, ayırt et" ilkesidir: model sorgu yazmaz, kodun sıraladığı adaylar arasından seçer.
 
 ### Örnek

@@ -62,6 +62,7 @@ _ABSTAIN_RESPONSE = (
 
 # Response when citation verification fails
 _FLAGGED_PREFIX = "[⚠️ UNVERIFIED] "
+_NO_SEEDS_RESPONSE = "I could not find relevant entry points in the knowledge graph."
 
 
 class GraphRAGPipeline:
@@ -205,10 +206,14 @@ class GraphRAGPipeline:
         logger.info("Phase 2 — Intent: %s", intent)
 
         # ── Phase 2: Seed Node Selection ──────────────────────────────────────
+        # Entry points for the traversal routes. The aggregate route needs
+        # none: it reads its anchor from the question ("Isaac Newton kaç eser
+        # yazdı?") and otherwise starts from every entity, which is what a
+        # question about the whole graph asks for. So an empty list ends the
+        # traversal routes only, and is decided after the plan has had its
+        # turn.
         seed_names = self._seeds.select(user_query)
-        if not seed_names:
-            return "I could not find relevant entry points in the knowledge graph."
-        logger.info("Phase 2 — Seeds: %s", seed_names)
+        logger.info("Phase 2 — Seeds: %s", seed_names or "(none)")
 
         # ── Phase 3 (aggregate): guided query planner → DB ────────────────────
         # Rerank and the hallucination gate are skipped: the DB result is
@@ -224,6 +229,10 @@ class GraphRAGPipeline:
                 return self._aggregate_answer(user_query, result)
             logger.info("Phase 3 — Aggregate route declined → %s", decision.fallback)
             intent = decision.fallback
+
+        if not seed_names:
+            logger.info("Phase 3 — No entry points for the %s route", intent)
+            return _NO_SEEDS_RESPONSE
 
         # ── Phase 3: Graph Traversal (+ Early Termination via Noul) ──────────
         raw_nodes: list[dict[str, Any]] = []
