@@ -282,6 +282,10 @@ def _evaluate_plan(db, item, planner, check, schema) -> dict[str, Any]:
     return {
         "plan_ms": plan_ms,
         "plan_description": result.description if result else None,
+        # The hops in the same "TYPE:direction" spelling the labelled set uses,
+        # so that a hop failure can be read off the record.
+        "gold_hops": list(item["plan"].get("hops", [])),
+        "plan_hops": [f"{h.rel_type or 'any'}:{h.direction}" for h in actual.hops] if actual else None,
         "steps": steps,
         "exact_plan_match": is_exact(steps, gold, actual),
         "result_match": actual is not None and result_rows(db, actual) == expected_rows(item),

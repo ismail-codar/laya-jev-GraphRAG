@@ -78,7 +78,7 @@ class TestOperationStep:
         "Her şey kaç tane?",                       # "her şey" is "everything"
     ])
     def test_these_are_not_distributive(self, science_graph, question):
-        model = ScriptedModel(choices=["count", "stop"])
+        model = ScriptedModel(choices=["count"])
         result = _plan(science_graph, model, question, [])
         assert not next(t for t in result.trace if t.step == "operation").forced
 
@@ -170,7 +170,7 @@ class TestStartStep:
     def test_a_seed_the_question_never_names_is_ignored(self, science_graph):
         # SeedSelector returns a best vector match even when the question
         # names nothing; that is not a reason to anchor on it.
-        model = ScriptedModel(choices=["count", "stop"])
+        model = ScriptedModel(choices=["count"])
         result = _plan(science_graph, model, "Graph'ta kaç varlık var?", ["Isaac Newton"])
         assert result.plan.start is None
 
@@ -185,7 +185,7 @@ class TestStartStep:
         assert result.plan.start == seed
 
     def test_a_longer_word_does_not_match_a_short_name(self, science_graph):
-        result = _plan(science_graph, ScriptedModel(choices=["count", "stop"]),
+        result = _plan(science_graph, ScriptedModel(choices=["count"]),
                        "ulmus ağacı graph'ta var mı?", ["Ulm"])
         assert result.plan.start is None
 
@@ -207,13 +207,58 @@ class TestHopLoop:
         assert "stop" in model.choice_calls[2]          # still offered from hop1 on
         assert result.plan.hops == [Hop("DEVELOPED", "in")]
 
-    def test_an_unanchored_plan_may_stop_at_hop0(self, science_graph):
+    def test_a_question_about_no_relation_stops_at_hop0(self, science_graph):
         # A zero-hop plan over the whole graph is a real answer ("how many
-        # entities are there?"), so `stop` stays on the table.
-        model = ScriptedModel(choices=["count", "stop"])
+        # entities are there?"), and the question names no relation, so code
+        # stops there rather than asking.
+        model = ScriptedModel(choices=["count"])
         result = _plan(science_graph, model, "Graph'ta kaç varlık var?", [])
-        assert "stop" in model.choice_calls[1]
         assert result.plan.hops == []
+        assert next(t for t in result.trace if t.step == "hop0").forced
+        assert not any("stop" in options for options in model.choice_calls)
+
+    def test_a_question_about_a_relation_may_not_stop_at_hop0(self, science_graph):
+        model = ScriptedModel(choices=["count", "any:out", "stop"])
+        result = _plan(science_graph, model, "Kaç tane ilişki var?", [])
+        assert "stop" not in model.choice_calls[1]
+        assert result.plan.hops == [Hop(None, "out")]
+
+    def test_a_named_relation_takes_the_other_types_off_hop0(self, science_graph):
+        # The fixture schema describes DEVELOPED as "developed an idea", so
+        # "developed" names it and nothing else.
+        model = ScriptedModel(choices=["list", "DEVELOPED:out", "stop"])
+        result = _plan(science_graph, model, "Who developed something?", [])
+        assert result.plan.hops == [Hop("DEVELOPED", "out")]
+        assert not any(k.startswith("any:") for k in model.choice_calls[1])
+
+    def test_a_named_relation_leaves_the_direction_to_the_model(self, science_graph):
+        model = ScriptedModel(choices=["list", "DEVELOPED:in", "stop"])
+        result = _plan(science_graph, model, "Who developed something?", [])
+        assert result.plan.hops == [Hop("DEVELOPED", "in")]
+        assert set(model.choice_calls[1]) == {"DEVELOPED:out", "DEVELOPED:in"}
+
+    def test_only_hop0_is_restricted(self, science_graph):
+        model = ScriptedModel(choices=["list", "DEVELOPED:out", "any:in"])
+        result = _plan(science_graph, model, "Who developed something?", [], max_hops=2)
+        assert result.plan.hops == [Hop("DEVELOPED", "out"), Hop(None, "in")]
+        assert any(k.startswith("any:") for k in model.choice_calls[2])
+
+    def test_a_relation_named_by_its_object_is_not_named(self, science_graph):
+        # "an idea" is what DEVELOPED acts on, not what it is called.
+        assert candidates.names_one_relation("Which idea is it?", {"DEVELOPED": "developed an idea"}) is None
+        assert candidates.names_one_relation("Who developed it?", {"DEVELOPED": "developed an idea"}) == "DEVELOPED"
+
+    def test_two_named_relations_leave_the_choice_alone(self, science_graph):
+        schema = {"DEVELOPED": "developed an idea", "AUTHORED": "wrote or authored a work"}
+        assert candidates.names_one_relation("Who developed and wrote something?", schema) is None
+
+    def test_a_single_option_is_forced_rather_than_asked(self, science_graph):
+        # Leibniz has one move in the fixture graph, and it is the one the
+        # question names, so nothing is left to decide.
+        model = ScriptedModel(choices=["list", "stop"])
+        result = _plan(science_graph, model, "What did Gottfried Leibniz develop?", ["Gottfried Leibniz"])
+        hop0 = next(t for t in result.trace if t.step == "hop0")
+        assert hop0.forced and hop0.selected == "DEVELOPED:out"
 
     def test_empty_frontier_forces_stop_without_asking(self, science_graph):
         model = ScriptedModel(choices=["list"])
@@ -229,7 +274,7 @@ class TestHopLoop:
         assert sum(1 for opts in model.choice_calls if "stop" in opts) <= 2
 
     def test_no_seeds_starts_from_all_without_asking(self, science_graph):
-        model = ScriptedModel(choices=["count", "stop"])
+        model = ScriptedModel(choices=["count"])
         result = _plan(science_graph, model, "Graph'ta kaç varlık var?", [])
         assert result.plan.start is None and result.plan.hops == []
         assert not any("anchor" in options for options in model.choice_calls)
@@ -258,7 +303,7 @@ class TestFiltersAndShape:
     def test_at_least_one_key_is_kept(self, science_graph):
         model = ScriptedModel(choices=["group", "any:out", "stop", "count"],
                               batch={"key:e0.type": 0.3, "key:v0.name": 0.2})
-        result = _plan(science_graph, model, "q", [])
+        result = _plan(science_graph, model, "ilişkiler neye göre gruplandı?", [])
         assert result.plan.keys == [FieldRef("e0", "type")]
 
 
@@ -272,14 +317,14 @@ class TestCollectMetric:
     def test_group_can_collect_the_relation_types(self, science_graph):
         model = ScriptedModel(choices=["group", "any:out", "stop", "collect:e0.type"],
                               batch={"key:v0.name": 0.9})
-        result = _plan(science_graph, model, "Kim hangi tür katkılar yapmış?", [])
+        result = _plan(science_graph, model, "Kim hangi tür ilişkiler kurmuş?", [])
         assert result.plan.metrics == [Metric("collect", FieldRef("e0", "type"))]
         assert "list of every relation type" in result.description
 
     def test_every_step_can_be_collected(self, science_graph):
         model = ScriptedModel(choices=["group", "any:out", "any:out", "collect:e1.type"],
                               batch={"key:v0.name": 0.9})
-        result = _plan(science_graph, model, "q", [], max_hops=2)
+        result = _plan(science_graph, model, "ilişkiler nereye gidiyor?", [], max_hops=2)
         assert result.plan.metrics == [Metric("collect", FieldRef("e1", "type"))]
         assert {"collect:e0.type", "collect:e1.type"} <= set(self._metric_options(model))
 
@@ -294,7 +339,7 @@ class TestCollectMetric:
         # The question holds a number, so `having` would normally be asked.
         model = ScriptedModel(choices=["group", "any:out", "stop", "collect:e0.type"],
                               nouls=[0.1], batch={"key:v0.name": 0.9})
-        result = _plan(science_graph, model, "2 ve üzeri tür katkı yapanlar hangi türlerde?", [])
+        result = _plan(science_graph, model, "2 ve üzeri ilişki kuranlar hangi türlerde?", [])
         assert result.plan.having == []
         assert not any(t.step.startswith("having") for t in result.trace)
 

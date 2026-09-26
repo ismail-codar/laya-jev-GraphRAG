@@ -54,7 +54,7 @@ _THEORY_PROBS = {"General Relativity": 0.9, "Universal Gravitation": 0.85, "Calc
 
 class TestCountRange:
     def test_uncertain_candidates_give_a_range(self, science_graph):
-        model = EntityModel(_THEORY_PROBS, choices=["count", "stop", "theory"])
+        model = EntityModel(_THEORY_PROBS, choices=["count", "theory"])
         result = _run(science_graph, model, THEORIES, [])
         assert result.semantic.sure_names == ["General Relativity", "Universal Gravitation"]
         assert result.semantic.uncertain_names == ["Calculus"]
@@ -67,14 +67,14 @@ class TestCountRange:
 
     def test_no_uncertain_candidates_give_a_single_number(self, science_graph):
         probs = {"General Relativity": 0.9, "Universal Gravitation": 0.85}
-        model = EntityModel(probs, choices=["count", "stop", "theory"])
+        model = EntityModel(probs, choices=["count", "theory"])
         result = _run(science_graph, model, THEORIES, [])
         assert result.upper_rows is None
         assert result.answer == "2 recorded in the graph: General Relativity, Universal Gravitation"
         assert "between" not in result.facts[0]["text"]
 
     def test_every_candidate_is_scored_once(self, science_graph):
-        model = EntityModel(_THEORY_PROBS, choices=["count", "stop", "theory"])
+        model = EntityModel(_THEORY_PROBS, choices=["count", "theory"])
         _run(science_graph, model, THEORIES, [])
         assert len(model.entity_calls) == len(set(model.entity_calls)) == 14
 
@@ -103,12 +103,12 @@ class TestGroupedSemanticFilter:
 
 class TestSkipAndCap:
     def test_candidate_cap_declines_the_plan(self, science_graph):
-        model = EntityModel(_THEORY_PROBS, choices=["count", "stop", "theory"])
+        model = EntityModel(_THEORY_PROBS, choices=["count", "theory"])
         assert _run(science_graph, model, THEORIES, [], max_candidates=5) is None
         assert model.entity_calls == []
 
     def test_no_predicate_leaves_the_plan_unchanged(self, science_graph):
-        model = EntityModel(_THEORY_PROBS, choices=["count", "stop", "none"])
+        model = EntityModel(_THEORY_PROBS, choices=["count", "none"])
         result = _run(science_graph, model, "How many entities are there in the graph?", [])
         assert result.semantic is None and result.upper_rows is None
         assert result.plan.filters == []

@@ -179,13 +179,37 @@ class _Planning:
                 self.forced(step, "stop")
                 return
             options = candidates.hop_options(self.plan, moves, self.p.relation_schema)
-            # An anchored plan that stops before its first hop returns the
-            # anchor itself, which answers no aggregate question. Measured:
-            # offered `stop` here, the model took it — anchoring the start
-            # halved hop accuracy because the plans came out zero-hop.
-            if i == 0 and self.plan.start:
+            if i == 0:
+                # Whether the answer needs a relation at all is readable from
+                # the question, and measured as the model's worst decision: of
+                # the ten questions that start from the whole graph it got the
+                # first hop right in three.
+                #
+                # A question that names no relation ("How many theories are
+                # there in the graph?") is about the entities themselves, so
+                # the plan stays at the start node. Every other plan takes at
+                # least one hop: an anchored plan that stops here returns the
+                # anchor itself, which answers no aggregate question, and a
+                # question that does name a relation is asking about it.
+                if not self.plan.start and not candidates.mentions_a_relation(
+                        self.question, self.p.relation_schema):
+                    self.forced(step, "stop")
+                    return
                 options.pop("stop")
-            selected = self.choose(step, _HOP_INSTRUCTION, options)
+                # If the question names one relation type and no other, the
+                # first hop is the one its verb describes ("... that Isaac
+                # Newton authored"), so `any` and the other types go. Naming
+                # two says nothing about which comes first, and the words are
+                # read out of the schema's own descriptions, so a schema
+                # written in another language than the question matches
+                # nothing and the model keeps the whole choice.
+                named = candidates.names_one_relation(self.question, self.p.relation_schema)
+                if named:
+                    options = candidates.only_this_relation(options, named)
+            # One option is not a choice, and asking would let a meaningless
+            # probability into the plan's confidence.
+            selected = (self.forced(step, next(iter(options))) if len(options) == 1
+                        else self.choose(step, _HOP_INSTRUCTION, options))
             if selected == "stop":
                 return
             rel_type, direction = selected.split(":")

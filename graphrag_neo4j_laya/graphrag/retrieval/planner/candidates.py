@@ -67,6 +67,67 @@ def asks_for_a_number(text: str) -> bool:
     return bool(_COUNT_QUESTION_RE.search(text))
 
 
+# A question that never mentions a relation is about the entities themselves,
+# not about anything they are connected to. The vocabulary is deliberately
+# generic: matching against the relation schema's own descriptions would read
+# "list every place in the graph" as a BORN_IN question, because that type is
+# described as "born in a place".
+_RELATION_WORD_RE = re.compile(
+    r"(?<!\w)("
+    r"relation\w*|edge\w*|connect\w*|connection\w*|link\w*|related|"
+    r"point(s|ing)?\s+to|step\w*|hop\w*|path\w*|"
+    r"ilişki\w*|bağl\w*|kenar\w*|adım\w*"
+    r")(?!\w)",
+    re.IGNORECASE,
+)
+
+
+# A schema description is a verb phrase — "wrote, published or authored a
+# work" — so the words that name the relation are the ones before its object.
+# Taking the object nouns too would read "list every place in the graph" as a
+# BORN_IN question, since that type is "was born in a place".
+_OBJECT_WORDS = frozenset(("a", "an", "another", "any", "some", "something", "someone", "the"))
+_FUNCTION_WORDS = frozenset(("was", "were", "is", "are", "or", "and", "of", "in", "on",
+                             "upon", "to", "first", "other"))
+
+
+def relation_words(description: str) -> frozenset[str]:
+    """The words of *description* that name the relation rather than its object."""
+    words = []
+    for word in re.findall(r"[a-z]+", description.lower()):
+        if word in _OBJECT_WORDS:
+            break
+        if word not in _FUNCTION_WORDS:
+            words.append(word)
+    return frozenset(words)
+
+
+def names_one_relation(text: str, relation_schema: dict[str, str]) -> str | None:
+    """
+    The single relation type *text* names, if it names exactly one.
+
+    Naming two ("the theory Einstein discovered") says nothing about which
+    one the next hop is, so the model keeps the choice.
+    """
+    said = {w.lower() for w in re.findall(r"[^\W\d_]+", text, re.UNICODE)}
+    named = [t for t, description in relation_schema.items() if relation_words(description) & said]
+    return named[0] if len(named) == 1 else None
+
+
+def mentions_a_relation(text: str, relation_schema: dict[str, str] | None = None) -> bool:
+    """Does the question talk about a relation between entities at all?"""
+    if _RELATION_WORD_RE.search(text):
+        return True
+    said = {w.lower() for w in re.findall(r"[^\W\d_]+", text, re.UNICODE)}
+    return any(relation_words(d) & said for d in (relation_schema or {}).values())
+
+
+def only_this_relation(options: dict[str, str], rel_type: str) -> dict[str, str]:
+    """The hop options of *rel_type* alone, or all of them if it has none here."""
+    kept = {key: text for key, text in options.items() if key.split(":")[0] == rel_type}
+    return kept or options
+
+
 def mentions_entity(text: str, name: str) -> bool:
     """
     Does *text* name the entity *name*?
