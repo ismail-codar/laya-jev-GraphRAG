@@ -269,6 +269,30 @@ def the_way_back(hop: Hop) -> str:
     return f"{hop.rel_type or 'any'}:{'in' if hop.direction == 'out' else 'out'}"
 
 
+# Over the whole graph a relation can be walked either way and the edges are
+# the same either way: only which end is called v0 changes. The convention is
+# that v0 is the end the relation leaves from — "hangi ilişki tiplerini
+# kullanıyor", "en çok **giden** ilişkisi olan" — unless the question says the
+# answer is at the other end.
+_DIRECTION_WORDS = (
+    ("in", re.compile(r"(?<!\w)(incoming|inbound|inward|gelen|alan)(?!\w)", re.IGNORECASE)),
+    ("out", re.compile(r"(?<!\w)(outgoing|outbound|outward|giden|çıkan)(?!\w)", re.IGNORECASE)),
+)
+
+
+def direction_named(text: str) -> str | None:
+    """The direction the question names for a hop out of the whole graph."""
+    for direction, pattern in _DIRECTION_WORDS:
+        if pattern.search(text):
+            return direction
+    return None
+
+
+def only_this_direction(options: dict[str, str], direction: str) -> dict[str, str]:
+    """The hop options walking *direction* alone; empty where there are none."""
+    return {key: text for key, text in options.items() if key.split(":")[1] == direction}
+
+
 def only_this_relation(options: dict[str, str], rel_type: str) -> dict[str, str]:
     """The hop options of *rel_type* alone; empty where the graph offers none."""
     return {key: text for key, text in options.items() if key.split(":")[0] == rel_type}

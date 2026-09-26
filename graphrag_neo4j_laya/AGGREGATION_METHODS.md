@@ -747,6 +747,13 @@ Yöntem 1–3'teki sabit şablonlar yerine sorguyu **adım adım** kurar. Her ad
      tipler seçeneklerden çıkar, yön modele kalır. İki tip birden anılıyorsa hangisinin önce
      geldiği belli değildir, seçenekler olduğu gibi kalır.
 
+   Plan bütün graph'tan başlıyorsa ilk hop'un **yönü** de kodda: bir ilişki iki yönde de
+   yürünebilir ve iki okumada da aynı kenarlar sayılır, yalnız hangi ucun `v0` olduğu değişir.
+   Kural, ilişkinin çıktığı ucu `v0` sayar — "en çok **giden** ilişkisi olan", "her varlık hangi
+   ilişki tiplerini **kullanıyor**" bunu soruyor — ve soru öbür ucu kastettiğinde bunu söylüyor
+   ("incoming", "gelen"). Başlangıç varlığı olan planlarda kural işlemez: oradan iki yön farklı
+   varlıklara gider ve karar modelindir.
+
    Anılan tip hep ilk hop olmak zorunda değil. Hangi adım olduğunu graph söylüyor: tip,
    **onu sunabilen ilk hop'ta** harcanır. "How many others **developed** something that Isaac
    Newton is **connected to**" sorusunda anılan ilişki yolun uzak ucundadır ve Newton'un hiç
@@ -851,26 +858,26 @@ Yöntem 1–5'in yapamadığı çok adımlı yol filtreleri de bu yolla ifade ed
 
 Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `examples/data/aggregate_eval.json`, 34 soru: 10 basit, 7 gruplu / filtreli, 4 iki hop'lu, 3 anlamsal filtreli agregasyon, ve 10 agregasyon olmayan soru; 14'ü Türkçe. Seed'ler setten gelir, yani seed seçim hataları sayılara karışmaz. Laya `multilingual` checkpoint, CPU, 2026-09-25.
 
-> Aşağıdaki tablo `t02` düzeltildikten sonraki ölçüm. Parantezdeki değerler bir önceki ölçüm —
-> diğer adımların hepsi bugünkü hâlindeydi, yalnız soru cevabını "everything" diye adlandırdığı
-> hâlde andığı tür cevabın kısıtı sayılıyordu.
+> Aşağıdaki tablo `g02` düzeltildikten sonraki ölçüm — etiketli setin **bütün adımları 24 / 24**.
+> Parantezdeki değerler bir önceki ölçüm; tek fark, bütün graph'tan atılan ilk hop'un yönü artık
+> modele sorulmuyor.
 
 | Ölçüm | Sonuç | Bayrak hedefi |
 | --- | --- | --- |
 | İşlem doğruluğu | %100 — kod + `Choice` | |
 | Başlangıç doğruluğu | %100 — kod kararı | |
-| Hop tipi / yön / durma | %100 / %95,8 / %100 (değişmedi) | yön ≥ %90 **✓** |
+| Hop tipi / yön / durma | **%100 / %100 / %100** (önce %100 / %95,8 / %100) | yön ≥ %90 **✓** |
 | Filtre adımı | %100 (değişmedi) | |
 | Anahtar / metrik / `HAVING` | %100 / %100 / %100 (değişmedi) | |
 | Anlamsal filtre adımı | **%100** (önce %95,8) | |
-| Tam plan eşleşmesi | **%95,8** (23 / 24 — önce %91,7) | |
-| Sonuç eşleşmesi | **%100** (24 / 24 — önce %95,8) | ≥ %80 **✓** |
+| Tam plan eşleşmesi | **%100** (24 / 24 — önce %95,8) | |
+| Sonuç eşleşmesi | %100 (24 / 24 — değişmedi) | ≥ %80 **✓** |
 | Agregasyon sorusunu `aggregate`'e yönlendirme | %37,5 (değişmedi) | |
 | Yanlış yönlendirme (agregasyon olmayan → `aggregate`) | %10 (1 / 10) | %0 |
 | Geri çeviri kontrolü: doğru planı geçirme / yanlış planı reddetme | %50,0 / %66,7 (değişmedi) | |
-| Min ve çarpım güveninin ayırma gücü | min %87,0 · çarpım %87,0 (önce %84,1 · %84,1) | |
-| Dil kırılımı (tam plan · sonuç) | en **%92,9 · %100** — tr **%100 · %100** | |
-| Gecikme (ortalama) | yönlendirme 0,30 sn · plan 0,83 sn | |
+| Min ve çarpım güveninin ayırma gücü | ölçülemiyor — ayıracak yanlış plan kalmadı (önce %87,0) | |
+| Dil kırılımı (tam plan · sonuç) | en **%100 · %100** — tr **%100 · %100** | |
+| Gecikme (ortalama) | yönlendirme 0,31 sn · plan 0,73 sn | |
 | Soru başına çağrı | **2,5 `Choice`** · 1,4 `Noul` · 0,0 `ask_batch` | |
 
 Üç bayrak hedefinin ikisi tuttu: sonuç eşleşmesi %91,7 ≥ %80 ve hop yönü %91,7 ≥ %90. Tutmayan tek hedef yanlış yönlendirme (%10, hedef %0) ve o planlayıcıda değil router'da; `aggregate` yönlendirmesi %37,5'te duruyor. Router rotası bu yüzden kapalı kalır.
@@ -903,7 +910,8 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 - **Filtre adımı artık çoğu soruda bedava.** İki karar da kodda olduğu için soru başına `Choice` 2,7 → 2,6, `Noul` 1,6 → 1,4 ve plan süresi 0,86 sn → 0,46 sn.
 - **Anılan ilişki tipi, onu sunabilen ilk hop'ta harcanıyor: `t04` uçtan uca düzeldi.** Kural yalnız ilk hop'a uygulanıyordu ve `t04`'te ("How many others **developed** something that Isaac Newton is **connected to**") anılan tip yolun uzak ucunda: Newton'un hiç `DEVELOPED` ilişkisi yok, o yüzden kısıt ilk hop'ta boşa düşüyor ve tip bir daha aranmıyordu. Plan `any:out, any:in, any:out` kuruyordu. Hangi adım olduğunu graph söylüyor — tip, onu sunabilen ilk hop'ta harcanır. Kısıt ikinci hop'a taşınınca seçenek tek adaya (`DEVELOPED:in`) düştü, model sorulmadan oraya oturdu ve **üçüncü hop'u da kendiliğinden bıraktı**: ikinci adım doğru olunca `stop` doğru cevap oldu. Yani "alt sınırı kesin sayı olarak uygula" turu gerekmedi. **Hop tipi %95,8 → %100, durma %95,8 → %100, filtre %95,8 → %100** (`t04`'ün filtresi fazla hop yüzünden yanlış varlığa bağlanıyordu), tam plan %87,5 → %91,7, sonuç %91,7 → %95,8, İngilizce sonuç %85,7 → %92,9.
 - **Soru cevabını adlandırmışsa, andığı tür cevaba ait değildir: anlamsal filtre %95,8 → %100, sonuç eşleşmesi %100.** Kalan tek yanlış pozitif `t02`'ydi: "List **everything** that the **theory** Albert Einstein discovered is connected to" — plan `theory` filtresi koyuyordu, oysa "theory" yolun ortasındaki varlığı tarif ediyor, cevabı değil. Cevabı soru zaten adlandırmış: "everything". Kural, sorunun cevabını tür belirtmeden adlandırdığı sözcükleri arıyor (everything / anything / entities / varlık / şey); geçiyorsa anılan tür düşer. Etiketli setin 34 sorusunun 14'ünde bu sözcüklerden biri geçiyor, yalnız birinde ("t02") ayrıca bir tür de anılıyor ve o sorunun altın filtresi yok; tür isteyen üç sorunun (`m01`, `m02`, `m03`) hiçbirinde geçmiyor. Sıfır yanlış pozitif.
-- **Sonuç eşleşmesi %100 (24 / 24), tam plan %95,8.** Kalan tek adım hatası `g02`'de ters yön ve sonucu değiştirmiyor: "How many edges of each relation type are there in the graph?" sorusunda bütün graph üzerinde `any:in` ile `any:out` aynı kenar kümesini sayıyor. Anlamsal filtre adımı da dahil olmak üzere **başka her adım 24 / 24**.
+- **Bütün graph'tan atılan hop'un yönü modelin bilgisi değil, bir yazım kuralı: yön %95,8 → %100, tam plan %100.** Kalan tek hata `g02`'ydi ("How many edges of each relation type are there in the graph?"): model `any:in` diyordu, altın plan `any:out`. İkisi de aynı kenarları sayıyor — bütün graph üzerinde bir ilişkiyi hangi yönden okuduğunuz yalnız hangi ucun `v0` olduğunu değiştirir. Yani soruya cevabı olmayan bir soru soruluyordu. Kural: ilişkinin çıktığı uç `v0`'dır, çünkü bir varlığın ilişkilerini soran sorular bunu kastediyor ("giden ilişkisi olan", "hangi ilişki tiplerini kullanıyor"); soru öbür ucu kastettiğinde söylüyor ("incoming", "gelen"). Setteki altı bütün-graph hop'unun altısı da `out` ve ikisi yönü sözcükle söylüyor; başlangıç varlığı olan planlara dokunulmuyor, orada iki yön farklı varlıklara gidiyor ve karar modelde kalıyor (o sorularda zaten %100'dü).
+- **Etiketli set artık doymuş durumda: her adım 24 / 24, tam plan ve sonuç %100.** Bunun bir bedeli var: güven ayırma gücü ölçülemiyor, çünkü ayıracak yanlış plan kalmadı. Planlayıcıyı bundan sonra ölçmek için yeni sorular gerekiyor.
 - **Güven ayırma gücü düşmeye devam ediyor** (min %62,5, çarpım %56,2). Adımların çoğu artık kodda ve 1,0 olasılıkla kayda geçiyor; geriye kalan `Choice`'lar tam da modelin kararsız olduğu yerler. Soru başına `Choice` 3,4'e, plan süresi 0,67 sn'ye indi.
 - **Zorlanan adım arttıkça güven ayırma gücü düştü** (min %93,8 → %78,7). Kalan `Choice`'lar tam da belirsiz olanlar; kodun aldığı adımlar 1,0 olasılıkla kayda geçtiği için güvene karışmıyor. Aynı sebeple soru başına `Choice` 3,7'den 3,6'ya, plan süresi 1,05 sn'den 0,82 sn'ye indi.
 - **Hop düzelince şekil adımı zorlaştı.** Anahtar %87,5 → %75,0, filtre %83,3 → %75,0: daha önce sıfır hop'ta kalan sorular artık bir hop attığı için gruplama anahtarı adayları çoğaldı ve model yanılıyor. Anlamsal filtre de %75,0 → %70,8 (`s06` artık gereksiz bir filtre ekliyor). Yine de tam plan %16,7 → %25,0 ve sonuç %20,8 → %25,0: artık sonuç isabetlerinin **altısı da** tam doğru plandan geliyor.
@@ -917,9 +925,11 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 
 ### Sonraki denemeler (ölçülmedi)
 
-- `g02`: kalan tek adım hatası (`any:in`, altın `any:out`); sonucu değiştirmiyor, çünkü bütün
-  graph üzerinde iki yön de aynı kenarları sayıyor. Ayrıca ölçülecek bir şey kalmadığı için
-  planlayıcı tarafında etiketli set doymuş sayılır — sonraki turlar router ve yeni sorular.
+- **Yeni sorular**: etiketli set doydu (her adım 24 / 24), yani artık planlayıcıyı ölçmüyor.
+  Sette hiç örneği olmayan biçimler: üç ve daha fazla hop, birden çok gruplama anahtarı, birden
+  çok tür, sayısal alan filtresi, `in` yönünde bütün-graph sorusu.
+- **Geri çeviri kontrolü** artık en zayıf halka: doğru planların yarısını reddediyor (%50). Her
+  adım doğru karar verirken kontrolün planı `None`'a çevirmesi net kayıp.
 - Yönlendirme: `aggregate` recall %37,5 ve yanlış yönlendirme %10. Planlayıcı artık doğru planlar kuruyor, ama router soruların çoğunu bu rotaya hiç sokmuyor; tutmayan tek bayrak hedefi de burada.
 - Metrik adımı: `collect` ile sayım arasındaki seçim iki soruda da yanlış tarafa düştü.
 - Aynı düzenekle Jev backend'ini ölçmek (`DECISION_MODEL_BACKEND=jev`).

@@ -124,6 +124,7 @@ Kronolojik; her satır bir commit. Ölçümler gerçek Laya, aynı 34 soru.
 | 10 | Filtre: sayısal filtre yalnız soru PageRank/topluluk anıyorsa (ve `rank` değilse) | filtre → **%95,8**, tam plan → **%87,5**, tr tam plan **%100** |
 | 11 | Anılan ilişki tipi, onu sunabilen ilk hop'ta harcanır (yalnız hop0'da değil) | hop tipi → **%100**, durma → **%100**, filtre → **%100**, sonuç → **%95,8** |
 | 12 | Soru cevabını adlandırmışsa ("everything", "varlık") andığı tür cevaba ait değil | anlamsal → **%100**, **sonuç %100**, tam plan **%95,8** |
+| 13 | Bütün graph'tan atılan ilk hop `out` (soru "incoming/gelen" demedikçe) | yön → **%100**, **tam plan %100** — her adım 24 / 24 |
 
 ### Çürütülen varsayımlar — tekrar denemeyin
 
@@ -155,16 +156,18 @@ Kronolojik; her satır bir commit. Ölçümler gerçek Laya, aynı 34 soru.
 
 ## 5. Sıradaki turlar (ölçülmedi)
 
-1. **Etiketli set doydu.** Sonuç eşleşmesi 24 / 24; kalan tek adım hatası `g02`'de ters yön ve
-   sonucu değiştirmiyor (bütün graph üzerinde iki yön de aynı kenarları sayıyor). Planlayıcıyı
-   bundan sonra ilerletmek için **yeni sorular** gerekiyor — üç ve daha fazla hop, birden çok
-   anahtar, birden çok tür, sayısal alan filtresi (şu an sette hiç örneği yok).
-2. **Router** — tutmayan tek bayrak hedefi burada: agregasyon sorularının yalnız %37,5'i bu
+1. **Etiketli set doydu — turlar burada bitti.** Her adım 24 / 24, tam plan ve sonuç %100.
+   Set artık planlayıcıyı ölçmüyor: yeni kuralı doğrulayacak yanlış plan kalmadı, güven ayırma
+   gücü bile hesaplanamıyor. Devam etmek için **yeni sorular** gerekiyor — üç ve daha fazla hop,
+   birden çok anahtar, birden çok tür, sayısal alan filtresi, `in` yönünde bütün-graph sorusu.
+   Yeni soru eklerken altın planları elle yazın ve önce mevcut planlayıcıyla ölçün.
+2. **Geri çeviri kontrolü** — artık en zayıf halka: doğru planların yarısını reddediyor (%50),
+   yanlışların üçte birini geçiriyor. Her adım doğruyken kontrolün planı `None`'a çevirmesi net
+   kayıp.
+3. **Router** — tutmayan tek bayrak hedefi burada: agregasyon sorularının yalnız %37,5'i bu
    rotaya giriyor, yanlış yönlendirme %10. Planlayıcı artık doğru plan kuruyor; darboğaz
    yönlendirme.
-3. **Jev backend'ini aynı düzenekle ölçmek** (`DECISION_MODEL_BACKEND=jev`).
-4. **Geri çeviri kontrolü** — doğru planların yarısını reddediyor, yanlışların üçte birini
-   geçiriyor (%50 / %66,7). Onarım adımı bu yüzden az işe yarıyor.
+4. **Jev backend'ini aynı düzenekle ölçmek** (`DECISION_MODEL_BACKEND=jev`).
 
 ---
 

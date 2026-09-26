@@ -198,6 +198,17 @@ class _Planning:
                     self.forced(step, "stop")
                     return
                 options.pop("stop")
+                if not self.plan.start:
+                    # Walked from the whole graph, a relation gives the same
+                    # edges whichever way it is read; only which end is called
+                    # v0 changes. The convention is that v0 is the end the
+                    # relation leaves from, which is what a question about an
+                    # entity's relations means ("hangi ilişki tiplerini
+                    # kullanıyor"), and the question says so when it means the
+                    # other end ("incoming", "gelen"). Asked as a Choice, the
+                    # model read the same edges backwards in `g02`.
+                    direction = candidates.direction_named(self.question) or "out"
+                    options = candidates.only_this_direction(options, direction) or options
             elif i < least:
                 # The question asks for a longer path than the plan has
                 # walked. Measured: offered `stop` here, the model took it in
