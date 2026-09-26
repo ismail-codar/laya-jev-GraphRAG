@@ -31,23 +31,44 @@ class TestRouterOptions:
         options = model.choice_detailed.call_args.args[2]
         assert list(options) == ["local", "multi_hop", "global"]
 
-    def test_flag_on_offers_aggregate(self, monkeypatch):
+    def test_flag_on_reads_the_aggregate_route_from_the_question(self, monkeypatch):
+        # The question says it counts, so the route is not the model's to pick
+        # and `aggregate` is never one of the options.
         monkeypatch.setattr(settings, "aggregate_route_enabled", True)
-        router, model = _router("aggregate", {"local": 0.1, "multi_hop": 0.2, "global": 0.1, "aggregate": 0.6})
+        router, model = _router("local", {"local": 0.7, "multi_hop": 0.2, "global": 0.1})
         assert router.route("How many theories are there?") == QueryIntent.AGGREGATE
-        assert "aggregate" in model.choice_detailed.call_args.args[2]
+        assert list(model.choice_detailed.call_args.args[2]) == ["local", "multi_hop", "global"]
+
+    def test_a_question_that_asks_for_no_aggregate_keeps_the_model_s_route(self, monkeypatch):
+        monkeypatch.setattr(settings, "aggregate_route_enabled", True)
+        router, _ = _router("local", {"local": 0.7, "multi_hop": 0.2, "global": 0.1})
+        assert router.route("Where was Newton born?") == QueryIntent.LOCAL
+
+    def test_the_flag_still_turns_the_route_off(self, monkeypatch):
+        monkeypatch.setattr(settings, "aggregate_route_enabled", False)
+        router, _ = _router("local", {"local": 0.7, "multi_hop": 0.2, "global": 0.1})
+        assert router.route("How many theories are there?") == QueryIntent.LOCAL
 
 
 class TestRouteDetailed:
     def test_confidence_and_fallback(self, monkeypatch):
         monkeypatch.setattr(settings, "aggregate_route_enabled", True)
-        router, _ = _router("aggregate", {"local": 0.1, "multi_hop": 0.25, "global": 0.05, "aggregate": 0.6})
+        router, _ = _router("local", {"local": 0.1, "multi_hop": 0.25, "global": 0.05})
         decision = router.route_detailed("How many theories are there?")
         assert decision.intent == QueryIntent.AGGREGATE
-        assert decision.confidence == pytest.approx(0.6)
+        # The route is the code's, so it carries no probability of its own;
+        # the fallback is the strategy the model liked best.
+        assert decision.confidence == 1.0
         assert decision.fallback == QueryIntent.MULTI_HOP
+
+    def test_a_plain_question_keeps_the_model_s_probability(self, monkeypatch):
+        monkeypatch.setattr(settings, "aggregate_route_enabled", True)
+        router, _ = _router("local", {"local": 0.7, "multi_hop": 0.2, "global": 0.1})
+        decision = router.route_detailed("Where was Newton born?")
+        assert decision.intent == QueryIntent.LOCAL
+        assert decision.confidence == pytest.approx(0.7)
 
     def test_fallback_is_never_aggregate(self, monkeypatch):
         monkeypatch.setattr(settings, "aggregate_route_enabled", True)
-        router, _ = _router("aggregate", {"local": 0.0, "multi_hop": 0.0, "global": 0.0, "aggregate": 1.0})
-        assert router.route_detailed("q").fallback != QueryIntent.AGGREGATE
+        router, _ = _router("local", {"local": 0.0, "multi_hop": 0.0, "global": 0.0})
+        assert router.route_detailed("How many are there?").fallback != QueryIntent.AGGREGATE

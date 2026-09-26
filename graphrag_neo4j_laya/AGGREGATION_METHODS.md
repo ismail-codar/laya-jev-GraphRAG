@@ -718,7 +718,7 @@ Tüm düğümleri taramak ölçeklenmez. Büyük graph'ta adaylar önce daraltı
 
 ## 7. Yöntem 6: Rehberli sorgu planlayıcı
 
-> Durum: implement edildi (`graphrag/retrieval/planner/`), router rotası `AGGREGATE_ROUTE_ENABLED` bayrağıyla **kapalı**. Plan: `docs/plans/2026-09-25-001-feat-guided-query-planner-plan.md`.
+> Durum: implement edildi (`graphrag/retrieval/planner/`), router rotası `AGGREGATE_ROUTE_ENABLED` bayrağıyla **kapalı** — üç bayrak hedefi de artık tutuyor, yani bayrağı açmanın önünde ölçülmüş bir engel kalmadı; açma kararı verilmedi. Plan: `docs/plans/2026-09-25-001-feat-guided-query-planner-plan.md`.
 
 ### Ne yapar
 
@@ -872,12 +872,13 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 | Anlamsal filtre adımı | **%100** (önce %95,8) | |
 | Tam plan eşleşmesi | **%100** (24 / 24 — önce %95,8) | |
 | Sonuç eşleşmesi | %100 (24 / 24 — değişmedi) | ≥ %80 **✓** |
-| Agregasyon sorusunu `aggregate`'e yönlendirme | %37,5 (değişmedi) | |
-| Yanlış yönlendirme (agregasyon olmayan → `aggregate`) | %10 (1 / 10) | %0 |
+| Agregasyon sorusunu `aggregate`'e yönlendirme | **%100** (önce %37,5) | |
+| Yanlış yönlendirme (agregasyon olmayan → `aggregate`) | **%0** (önce %10) | %0 **✓** |
+| Yönlendirme doğruluğu (34 soru) | **%91,2** (31 / 34 — önce %41,2) | |
 | Geri okuma: doğru planı koruma / yanlış planı yenme | **%79,2 / %79,2** (eşikliyken %50,0 / %66,7) | |
 | Min ve çarpım güveninin ayırma gücü | ölçülemiyor — ayıracak yanlış plan kalmadı (önce %87,0) | |
 | Dil kırılımı (tam plan · sonuç) | en **%100 · %100** — tr **%100 · %100** | |
-| Gecikme (ortalama) | yönlendirme 0,31 sn · plan 0,73 sn | |
+| Gecikme (ortalama) | yönlendirme 0,11 sn · plan 0,39 sn | |
 | Soru başına çağrı | **2,5 `Choice`** · 1,4 `Noul` · 0,0 `ask_batch` | |
 
 Üç bayrak hedefinin ikisi tuttu: sonuç eşleşmesi %91,7 ≥ %80 ve hop yönü %91,7 ≥ %90. Tutmayan tek hedef yanlış yönlendirme (%10, hedef %0) ve o planlayıcıda değil router'da; `aggregate` yönlendirmesi %37,5'te duruyor. Router rotası bu yüzden kapalı kalır.
@@ -911,6 +912,9 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 - **Anılan ilişki tipi, onu sunabilen ilk hop'ta harcanıyor: `t04` uçtan uca düzeldi.** Kural yalnız ilk hop'a uygulanıyordu ve `t04`'te ("How many others **developed** something that Isaac Newton is **connected to**") anılan tip yolun uzak ucunda: Newton'un hiç `DEVELOPED` ilişkisi yok, o yüzden kısıt ilk hop'ta boşa düşüyor ve tip bir daha aranmıyordu. Plan `any:out, any:in, any:out` kuruyordu. Hangi adım olduğunu graph söylüyor — tip, onu sunabilen ilk hop'ta harcanır. Kısıt ikinci hop'a taşınınca seçenek tek adaya (`DEVELOPED:in`) düştü, model sorulmadan oraya oturdu ve **üçüncü hop'u da kendiliğinden bıraktı**: ikinci adım doğru olunca `stop` doğru cevap oldu. Yani "alt sınırı kesin sayı olarak uygula" turu gerekmedi. **Hop tipi %95,8 → %100, durma %95,8 → %100, filtre %95,8 → %100** (`t04`'ün filtresi fazla hop yüzünden yanlış varlığa bağlanıyordu), tam plan %87,5 → %91,7, sonuç %91,7 → %95,8, İngilizce sonuç %85,7 → %92,9.
 - **Soru cevabını adlandırmışsa, andığı tür cevaba ait değildir: anlamsal filtre %95,8 → %100, sonuç eşleşmesi %100.** Kalan tek yanlış pozitif `t02`'ydi: "List **everything** that the **theory** Albert Einstein discovered is connected to" — plan `theory` filtresi koyuyordu, oysa "theory" yolun ortasındaki varlığı tarif ediyor, cevabı değil. Cevabı soru zaten adlandırmış: "everything". Kural, sorunun cevabını tür belirtmeden adlandırdığı sözcükleri arıyor (everything / anything / entities / varlık / şey); geçiyorsa anılan tür düşer. Etiketli setin 34 sorusunun 14'ünde bu sözcüklerden biri geçiyor, yalnız birinde ("t02") ayrıca bir tür de anılıyor ve o sorunun altın filtresi yok; tür isteyen üç sorunun (`m01`, `m02`, `m03`) hiçbirinde geçmiyor. Sıfır yanlış pozitif.
 - **Bütün graph'tan atılan hop'un yönü modelin bilgisi değil, bir yazım kuralı: yön %95,8 → %100, tam plan %100.** Kalan tek hata `g02`'ydi ("How many edges of each relation type are there in the graph?"): model `any:in` diyordu, altın plan `any:out`. İkisi de aynı kenarları sayıyor — bütün graph üzerinde bir ilişkiyi hangi yönden okuduğunuz yalnız hangi ucun `v0` olduğunu değiştirir. Yani soruya cevabı olmayan bir soru soruluyordu. Kural: ilişkinin çıktığı uç `v0`'dır, çünkü bir varlığın ilişkilerini soran sorular bunu kastediyor ("giden ilişkisi olan", "hangi ilişki tiplerini kullanıyor"); soru öbür ucu kastettiğinde söylüyor ("incoming", "gelen"). Setteki altı bütün-graph hop'unun altısı da `out` ve ikisi yönü sözcükle söylüyor; başlangıç varlığı olan planlara dokunulmuyor, orada iki yön farklı varlıklara gidiyor ve karar modelde kalıyor (o sorularda zaten %100'dü).
+- **`aggregate` rotası modelin kararı değil, sorunun sözcükleri: recall %37,5 → %100, yanlış yönlendirme %10 → %0.** Dördüncü bir seçenek olarak sunulduğunda 24 agregasyon sorusunun 13'ü `local` ya da `multi_hop`'a gidiyordu ("How many places was Isaac Newton born in?" → `local`, P = 0,98), rotaya giren 11'in üçü de eşiğin altında kalıyordu; üstelik hiçbir şey saymayan üç soru bu rotaya çekiliyordu. Oysa planlayıcının cevaplayabildiği dört biçimin dördü de ifadede söyleniyor: bir sayı ("how many", "kaç"), bütün eşleşmeler ("list all", "tüm … listele"), bir sıralama ("en çok"), kategori başına bir döküm ("of each type", "her … türünden"). Bunlar işlem adımının zaten okuduğu sözcükler; router aynı okumayı kullanıyor. Etiketli setin 34 sorusunda kural birebir doğru: 24 agregasyon sorusunun hepsinde evet, 10 agregasyon olmayan sorunun hepsinde hayır. Seçenek listeden tamamen çıktığı için yanlış yönlendirme yapısal olarak sıfır. **Üç bayrak hedefi de ilk kez tuttu.**
+- **Üç stratejinin ifadesi de ölçüldü: 3 / 10 → 7 / 10.** Seçenek `aggregate` çıkınca kalan üçlü seçim ilk ölçümde geriledi (modelin yedi soruyu birden `local`'e koyduğu görüldü), yani ifade zaten zayıfmış. "Stratejinin karmaşıklığı ve kapsamı" yerine **cevabın biçimi** tarif edildi ("The answer is one fact about one named entity" / "… the chain of relations between two named entities" / "… a summary of the graph as a whole") ve yönerge "What does the question ask about?" oldu: `local` ve `multi_hop` sorularının yedisi de doğru. Yönlendirme doğruluğu %41,2 → **%91,2**.
+- **Kalan üç hata da `global`.** "Give me an overview…", "What are the main themes…", "Bu bilgi grafındaki ana temalar…" — denenen dört ifadenin hiçbirinde model `global`'i seçmedi. Bu sorularda da cevabın biçimi ifadede duruyor ("overview", "main themes", "ana tema"), ama etiketli sette yalnız üç `global` sorusu var: üç veri noktasına kural yazmak onları ezberlemek olur. Ölçülebilir hale gelmesi için daha çok `global` sorusu gerekiyor.
 - **Etiketli set artık doymuş durumda: her adım 24 / 24, tam plan ve sonuç %100.** Bunun bir bedeli var: güven ayırma gücü ölçülemiyor, çünkü ayıracak yanlış plan kalmadı. Planlayıcıyı bundan sonra ölçmek için yeni sorular gerekiyor.
 - **Güven ayırma gücü düşmeye devam ediyor** (min %62,5, çarpım %56,2). Adımların çoğu artık kodda ve 1,0 olasılıkla kayda geçiyor; geriye kalan `Choice`'lar tam da modelin kararsız olduğu yerler. Soru başına `Choice` 3,4'e, plan süresi 0,67 sn'ye indi.
 - **Zorlanan adım arttıkça güven ayırma gücü düştü** (min %93,8 → %78,7). Kalan `Choice`'lar tam da belirsiz olanlar; kodun aldığı adımlar 1,0 olasılıkla kayda geçtiği için güvene karışmıyor. Aynı sebeple soru başına `Choice` 3,7'den 3,6'ya, plan süresi 1,05 sn'den 0,82 sn'ye indi.
@@ -932,7 +936,10 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 - **Geri okumayı ne zaman yapacağımız**: şimdi her soruda yapılıyor ve bir plan kurma + bir
   `Noul` daha maliyeti var. En küçük marjın büyük olduğu planlarda (model kararsız değilken)
   atlanabilir — ama bunu ölçecek yanlış plan kalmadığı için denenmedi.
-- Yönlendirme: `aggregate` recall %37,5 ve yanlış yönlendirme %10. Planlayıcı artık doğru planlar kuruyor, ama router soruların çoğunu bu rotaya hiç sokmuyor; tutmayan tek bayrak hedefi de burada.
+- **`global` rotası**: kalan üç yönlendirme hatasının üçü de orada ve model dört ifadenin
+  hiçbirinde bu rotayı seçmedi. Önce daha çok `global` sorusu etiketlemek gerekiyor.
+- **Bayrağı açmak**: üç hedef de tuttuğuna göre `AGGREGATE_ROUTE_ENABLED` açılabilir; karar
+  verilmedi, ölçüm hâlâ tek bir küçük graph üzerinde.
 - Metrik adımı: `collect` ile sayım arasındaki seçim iki soruda da yanlış tarafa düştü.
 - Aynı düzenekle Jev backend'ini ölçmek (`DECISION_MODEL_BACKEND=jev`).
 

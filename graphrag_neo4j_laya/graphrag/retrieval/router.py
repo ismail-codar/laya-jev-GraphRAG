@@ -7,13 +7,22 @@ Uses the CHOICE primitive to route queries to one of three strategies:
     local      → Score-Gated BFS (single-hop, low-latency)
     multi_hop  → Semantic A* Search (multi-hop, idea.md §4)
     global     → Community summary synthesis (high-level, broad)
-    aggregate  → Guided query planner (count / list / rank / group), offered
-                 only when settings.aggregate_route_enabled is on
+    aggregate  → Guided query planner (count / list / rank / group), taken
+                 when the question asks for one and the
+                 settings.aggregate_route_enabled flag is on
 
-The Choice primitive is semantically correct here:
+The Choice primitive is semantically correct for the first three:
   - It selects ONE option from a predefined set
   - Each option has a natural-language description
   - The decision model (Laya or Jev) picks the best fit in a single call
+
+The aggregate route is not one of them. Whether a question asks for a number,
+for every match, for a ranking or for a breakdown is readable in its words
+("how many", "list all", "the most", "of each type"), and offered as a fourth
+option it was measured as the router's worst decision: 13 of 24 aggregate
+questions went to `local` or `multi_hop`, while three questions that ask for
+nothing of the kind were pulled into it. So code answers that one, and the
+model picks among the three retrieval strategies as before.
 """
 
 from __future__ import annotations
@@ -24,6 +33,7 @@ from enum import Enum
 
 from config.settings import settings
 from graphrag.models.decision_factory import get_decision_model
+from graphrag.retrieval.planner import candidates
 
 logger = logging.getLogger(__name__)
 
@@ -37,19 +47,15 @@ class QueryIntent(str, Enum):
 
 # Routing schema: keys are option labels, values are natural-language descriptions
 # Presented to the Choice primitive as the options dict.
+# Described by the shape of the answer rather than by the strategy's
+# "complexity and scope": measured over the labelled non-aggregate questions,
+# the older wording put seven of ten in `local` (3 / 10 right) and this one
+# gets 7 / 10, with every local and multi-hop question right.
 _ROUTE_OPTIONS: dict[str, str] = {
-    "local":     "The question asks about one specific fact of one entity.",
-    "multi_hop": (
-        "The question asks how two or more entities are connected, "
-        "requiring a chain of facts."
-    ),
-    "global":    "The question asks for a broad summary or overview of a whole topic.",
+    "local":     "The answer is one fact about one named entity.",
+    "multi_hop": "The answer is the chain of relations between two named entities.",
+    "global":    "The answer is a summary of the graph as a whole.",
 }
-
-_AGGREGATE_OPTION = (
-    "The question asks to count, rank, total or list ALL items of some kind "
-    "(how many, which has the most, list every, per type)."
-)
 
 @dataclass
 class RouteDecision:
@@ -59,10 +65,7 @@ class RouteDecision:
     fallback:   QueryIntent
 
 
-_ROUTE_INSTRUCTION = (
-    "Which graph retrieval strategy should be used to answer this question? "
-    "Select the strategy that best matches the query's complexity and scope."
-)
+_ROUTE_INSTRUCTION = "What does the question ask about?"
 
 
 class IntentRouter:
@@ -94,17 +97,18 @@ class IntentRouter:
 
     def route_detailed(self, user_query: str) -> RouteDecision:
         """Like route(), plus the selected option's probability and a fallback intent."""
-        options = dict(_ROUTE_OPTIONS)
-        if settings.aggregate_route_enabled:
-            options["aggregate"] = _AGGREGATE_OPTION
-
         context = f"User question: {user_query}"
-        result = self._model.choice_detailed(context, _ROUTE_INSTRUCTION, options)
+        result = self._model.choice_detailed(context, _ROUTE_INSTRUCTION, dict(_ROUTE_OPTIONS))
 
-        label    = result.selected or "multi_hop"   # safe default
-        intent   = QueryIntent(label)
         probs    = result.raw_probs or {}
         fallback = max(_ROUTE_OPTIONS, key=lambda k: probs.get(k, 0.0)) if probs else "multi_hop"
+        # The model always names a retrieval strategy; it is the fallback the
+        # aggregate route falls back to, and the route itself when the
+        # question asks for nothing to count, list, rank or break down.
+        aggregate = (settings.aggregate_route_enabled
+                     and candidates.asks_for_an_aggregate(user_query))
+        label  = "aggregate" if aggregate else (result.selected or "multi_hop")
+        intent = QueryIntent(label)
 
         logger.info(
             "Query routed → %s (confidence=%.2f, backend=%s)",
@@ -113,6 +117,6 @@ class IntentRouter:
         logger.debug("Router raw probs: %s", result.raw_probs)
         return RouteDecision(
             intent=intent,
-            confidence=float(probs.get(label, result.score)),
+            confidence=1.0 if aggregate else float(probs.get(label, result.score)),
             fallback=QueryIntent(fallback),
         )

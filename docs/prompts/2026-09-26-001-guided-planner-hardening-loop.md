@@ -126,6 +126,8 @@ Kronolojik; her satır bir commit. Ölçümler gerçek Laya, aynı 34 soru.
 | 12 | Soru cevabını adlandırmışsa ("everything", "varlık") andığı tür cevaba ait değil | anlamsal → **%100**, **sonuç %100**, tam plan **%95,8** |
 | 13 | Bütün graph'tan atılan ilk hop `out` (soru "incoming/gelen" demedikçe) | yön → **%100**, **tam plan %100** — her adım 24 / 24 |
 | 14 | Geri okuma eşik değil karşılaştırma: plan ile onarım adayı puanlanır, iyisi çalışır | doğru planı koruma %50 → **%79,2**, yanlış planı yenme %66,7 → **%79,2** |
+| 15 | `aggregate` rotası koda: soru sayı / hepsi / sıralama / döküm istiyor mu | recall %37,5 → **%100**, yanlış yönlendirme %10 → **%0** |
+| 16 | Üç stratejinin ifadesi cevabın biçimiyle yazıldı | agregasyon olmayan 3 / 10 → **7 / 10**, yönlendirme doğruluğu → **%91,2** |
 
 ### Çürütülen varsayımlar — tekrar denemeyin
 
@@ -169,9 +171,9 @@ Kronolojik; her satır bir commit. Ölçümler gerçek Laya, aynı 34 soru.
 2. **Geri okumanın maliyeti** — her soruda bir plan kurma + bir `Noul` daha. Marjı büyük
    planlarda (model kararsız değilken) atlanabilir; ölçecek yanlış plan kalmadığı için
    denenmedi.
-3. **Router** — tutmayan tek bayrak hedefi burada: agregasyon sorularının yalnız %37,5'i bu
-   rotaya giriyor, yanlış yönlendirme %10. Planlayıcı artık doğru plan kuruyor; darboğaz
-   yönlendirme.
+3. **`global` rotası** — kalan üç yönlendirme hatasının üçü de orada; model dört ayrı ifadenin
+   hiçbirinde `global`'i seçmedi. Sette yalnız üç `global` sorusu var, o yüzden kural yazmak
+   ezberlemek olur: önce soru gerekiyor.
 4. **Jev backend'ini aynı düzenekle ölçmek** (`DECISION_MODEL_BACKEND=jev`).
 
 ---

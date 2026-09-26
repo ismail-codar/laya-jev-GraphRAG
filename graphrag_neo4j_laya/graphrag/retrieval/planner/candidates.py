@@ -142,6 +142,21 @@ def asks_for_anything(text: str) -> bool:
     return bool(_ANYTHING_RE.search(text))
 
 
+# The planner can answer four shapes of question — a number, every match, a
+# ranking, a breakdown per category — and each of them is said in words:
+# "how many", "list all", "the most", "of each type". A question that says
+# none of them is not asking for an aggregate, whatever else it is about.
+_ALL_MATCHES_RE = re.compile(
+    r"(?<!\w)(all|every|everything|list|tüm|bütün|hepsi|listele)(?!\w)", re.IGNORECASE)
+
+
+def asks_for_an_aggregate(text: str) -> bool:
+    """Does the question ask for a number, every match, a ranking or a breakdown?"""
+    return bool(asks_for_a_number(text) or sets_a_threshold(text)
+                or asks_for_a_ranking(text) or asks_per_group(text)
+                or _ALL_MATCHES_RE.search(text))
+
+
 def kinds_named(text: str, predicate_words: dict[str, tuple[str, ...]]) -> list[str]:
     """Every predicate kind *text* names."""
     said = {w.lower() for w in re.findall(r"[^\W\d_]+", text, re.UNICODE)}
