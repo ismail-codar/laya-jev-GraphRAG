@@ -3,7 +3,7 @@ rem Runs the test suite and writes a Markdown report with every test's
 rem status and the reason for each FAIL / ERROR / XFAIL / XPASS / SKIP.
 rem
 rem Asks two questions (Enter takes the default):
-rem   live tests (real Laya model)?   [e/H]  default: no
+rem   live tests (real Laya model)?   [E/h]  default: yes
 rem   scope: planner or all tests?    [P/t]  default: planner (tests\test_planner*.py)
 rem
 rem Usage:  run_tests_report.cmd [report.md] [options] [extra pytest args...]
@@ -35,10 +35,10 @@ shift
 goto collect
 
 :ask
-if not defined LIVE set /p "LIVE=Live testler calissin mi (gercek Laya modeli)? [e/H]: "
-if not defined LIVE set "LIVE=n"
-if /i "%LIVE%"=="e" set "LIVE=y"
-if /i not "%LIVE%"=="y" set "LIVE=n"
+if not defined LIVE set /p "LIVE=Live testler calissin mi (gercek Laya modeli)? [E/h]: "
+if not defined LIVE set "LIVE=y"
+if /i "%LIVE%"=="h" set "LIVE=n"
+if /i not "%LIVE%"=="n" set "LIVE=y"
 
 if not defined SCOPE set /p "SCOPE=Kapsam: planner testleri mi, tum testler mi? [P/t]: "
 if not defined SCOPE set "SCOPE=p"
