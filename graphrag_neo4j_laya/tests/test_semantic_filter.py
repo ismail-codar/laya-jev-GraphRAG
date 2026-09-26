@@ -86,6 +86,17 @@ class TestWhichKindIsAsked:
                             ["Isaac Newton"], relation_schema=SCHEMA, max_hops=2)
         assert result.semantic is None
 
+    def test_a_question_that_asks_for_everything_is_not_filtered(self, science_graph):
+        # "everything" is what the answer is; the theory is the entity the
+        # first hop reaches.
+        model = EntityModel({}, choices=["list", "DISCOVERED:out", "any:out"])
+        result = self._plan(science_graph, model,
+                            "List everything that the theory Albert Einstein discovered "
+                            "is connected to.",
+                            ["Albert Einstein"], relation_schema=SCHEMA, max_hops=2)
+        assert result.semantic is None
+        assert self._semantic_options(model) is None
+
     def test_a_zero_hop_plan_takes_the_kind_it_names(self, science_graph):
         model = EntityModel(_THEORY_PROBS, choices=["count"])
         result = self._plan(science_graph, model, THEORIES, [])

@@ -37,8 +37,6 @@ _OPERATION_OPTIONS = {
     "group": "The question asks for a breakdown: a number per type, per entity or per group.",
 }
 _HOP_INSTRUCTION = "Which next step brings this graph query closer to answering the question?"
-_EXCLUDE_INSTRUCTION = "Does the question ask for entities other than the start entity itself?"
-_NUMERIC_FILTER_INSTRUCTION = "Does the question keep only entities whose numeric value is above or below a number?"
 _HAVING_INSTRUCTION = "Does the question keep only groups whose count or total is above or below a number?"
 _COMPARISON_OPTIONS = {
     ">": "greater than", ">=": "at least", "<": "less than", "<=": "at most", "=": "exactly equal to",
@@ -174,6 +172,8 @@ class _Planning:
     def hops(self) -> None:
         least, exact = candidates.hops_asked_for(self.question, self.p.relation_schema,
                                                  self.p.relation_words)
+        named = candidates.names_one_relation(self.question, self.p.relation_schema,
+                                              self.p.relation_words)
         for i in range(self.p.max_hops):
             step = f"hop{i}"
             moves = self.p.db.frontier_moves(self.frontier())
@@ -198,17 +198,17 @@ class _Planning:
                     self.forced(step, "stop")
                     return
                 options.pop("stop")
-                # If the question names one relation type and no other, the
-                # first hop is the one its verb describes ("... that Isaac
-                # Newton authored"), so `any` and the other types go. Naming
-                # two says nothing about which comes first, and the words are
-                # read out of the schema's own descriptions, so a schema
-                # written in another language than the question matches
-                # nothing and the model keeps the whole choice.
-                named = candidates.names_one_relation(self.question, self.p.relation_schema,
-                                                      self.p.relation_words)
-                if named:
-                    options = candidates.only_this_relation(options, named)
+                if not self.plan.start:
+                    # Walked from the whole graph, a relation gives the same
+                    # edges whichever way it is read; only which end is called
+                    # v0 changes. The convention is that v0 is the end the
+                    # relation leaves from, which is what a question about an
+                    # entity's relations means ("hangi ilişki tiplerini
+                    # kullanıyor"), and the question says so when it means the
+                    # other end ("incoming", "gelen"). Asked as a Choice, the
+                    # model read the same edges backwards in `g02`.
+                    direction = candidates.direction_named(self.question) or "out"
+                    options = candidates.only_this_direction(options, direction) or options
             elif i < least:
                 # The question asks for a longer path than the plan has
                 # walked. Measured: offered `stop` here, the model took it in
@@ -218,6 +218,24 @@ class _Planning:
                 # It said how many steps, and the plan has taken them.
                 self.forced(step, "stop")
                 return
+            if named:
+                # A question that names one relation type and no other says
+                # which step that type is by where the graph can take it. It
+                # is usually the first ("... that Isaac Newton **authored**"),
+                # but not always: "how many others **developed** something
+                # that Isaac Newton is **connected to**" names the far step,
+                # and Newton has no DEVELOPED relation to take. So the type is
+                # spent on the first hop that offers it, and after that the
+                # question has said all it says about types. Naming two types
+                # says nothing about which comes first, and the words come out
+                # of the schema's own descriptions, so a schema written in
+                # another language than the question matches nothing and the
+                # model keeps the whole choice.
+                narrowed = candidates.only_this_relation(options, named)
+                if narrowed:
+                    if "stop" in options:
+                        narrowed["stop"] = options["stop"]
+                    options, named = narrowed, None
             if i and not candidates.asks_for_the_others(self.question):
                 # Reversing the hop just taken walks back to the entities the
                 # plan came from, so it answers nothing the plan does not
@@ -238,19 +256,38 @@ class _Planning:
             self.plan.hops.append(Hop(None if rel_type == "any" else rel_type, direction))
 
     def filters(self, numbers: list[int | float]) -> None:
-        target = self.plan.target
-        if self.plan.start and len(self.plan.hops) >= 2 and self.yes("exclude_start", _EXCLUDE_INSTRUCTION):
-            self.plan.filters.append(Filter(FieldRef(target, "name"), "!=", self.plan.start))
-        if not numbers or not self.yes("filter_numeric", _NUMERIC_FILTER_INSTRUCTION):
+        # A walk of two or more steps comes back through the entity it left:
+        # every two-hop question of the labelled set asks for the others
+        # ("how many *others* developed something Newton is connected to"),
+        # and none of them counts the start entity as part of its answer.
+        # Asked as a Noul, the model kept it in half of them.
+        if self.plan.start and len(self.plan.hops) >= 2:
+            self.forced("exclude_start", "yes")
+            self.plan.filters.append(
+                Filter(FieldRef(self.plan.target, "name"), "!=", self.plan.start))
+        # A number belongs to a node's own value only where the question names
+        # one of the two a node carries. Otherwise it is the top-k of a
+        # ranking ("en çok giden ilişkisi olan **2** varlık") or a threshold
+        # on a group ("**1**'den fazla geçen"), and the shape step reads it
+        # out of the same wording. Asked as a Noul, the model spent the
+        # number here in both, and filtered the community by a top-k.
+        # A ranking spends its number on the top-k ("PageRank'ı en yüksek **3**
+        # varlık"), even when it names the field it ranks by.
+        field = None if self.plan.operation == "rank" else candidates.numeric_field_named(self.question)
+        if not numbers or not field:
+            self.forced("filter_numeric", "no")
             return
-        fields = {
-            f"{v}.{f}": f"the {f} of {'the start entity' if v == 'v0' else 'the step-' + v[1:] + ' entity'}"
-            for v, f in candidates.numeric_field_candidates(self.plan)
-        }
-        var, fld = self.choose("filter_field", "Which value does the question compare with a number?", fields).split(".")
-        op = self.choose("filter_op", "How is the value compared with the number?", _COMPARISON_OPTIONS)
-        value = self._number("filter_value", numbers)
-        self.plan.filters.append(Filter(FieldRef(var, fld), op, value))
+        self.forced("filter_numeric", "yes")
+        entities = {v: _which_entity(v, self.plan) for v in candidates.node_vars(self.plan)}
+        var = (self.forced("filter_field", next(iter(entities))) if len(entities) == 1
+               else self.choose("filter_field",
+                                f"Whose {field} does the question compare with a number?", entities))
+        said_op = candidates.comparison_from_wording(self.question)
+        op = (self.forced("filter_op", said_op) if said_op
+              else self.choose("filter_op", "How is the value compared with the number?",
+                               _COMPARISON_OPTIONS))
+        self.plan.filters.append(Filter(FieldRef(var, field), op,
+                                        self._number("filter_value", numbers)))
 
     def shape(self, numbers: list[int | float]) -> None:
         if self.plan.operation not in ("group", "rank"):
@@ -309,6 +346,12 @@ class _Planning:
                    for hop in self.plan.hops}
         named = [kind for kind in candidates.kinds_named(self.question, words)
                  if kind not in implied]
+        if candidates.asks_for_anything(self.question):
+            # The question has already said what it wants — "List
+            # **everything** that the theory Einstein discovered is connected
+            # to" — so the kind it also names belongs to the entity in the
+            # middle of the path, not to the answer.
+            named = []
         if not named:
             self.forced("semantic", semantic_filter.NO_PREDICATE)
             return

@@ -293,6 +293,9 @@ def _evaluate_plan(db, item, planner, check, schema) -> dict[str, Any]:
                        "metrics": list(item["plan"].get("metrics", []))},
         "plan_shape": {"keys": [f"{k.var}.{k.field}" for k in actual.keys],
                        "metrics": [_spell_metric(m) for m in actual.metrics]} if actual else None,
+        "gold_filters": list(item["plan"].get("filters", [])),
+        "plan_filters": [[f"{f.ref.var}.{f.ref.field}", f.op, f.value]
+                         for f in actual.filters] if actual else None,
         "gold_semantic": gold_semantic,
         "plan_semantic": actual_semantic,
         "steps": steps,

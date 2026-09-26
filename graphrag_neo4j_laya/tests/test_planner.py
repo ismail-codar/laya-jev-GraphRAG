@@ -198,6 +198,17 @@ class TestStartStep:
 
 
 class TestHopLoop:
+    def test_a_named_type_waits_for_the_hop_that_offers_it(self, science_graph):
+        # The named relation is the far step of the path: Isaac Newton has no
+        # DEVELOPED relation, so the first hop stays open and the second one
+        # is the named type, with nothing left to ask.
+        model = ScriptedModel(choices=["count", "any:out", "stop"])
+        result = _plan(science_graph, model,
+                       "How many others developed something that Isaac Newton is connected to?",
+                       ["Isaac Newton"], max_hops=3)
+        assert result.plan.hops == [Hop(None, "out"), Hop("DEVELOPED", "in")]
+        assert next(t for t in result.trace if t.step == "hop1").forced
+
     def test_an_anchored_plan_is_not_offered_stop_at_hop0(self, science_graph):
         # Stopping before the first hop would return the anchor itself.
         model = ScriptedModel(choices=["count", "DEVELOPED:in"])
@@ -231,23 +242,34 @@ class TestHopLoop:
 
     def test_a_named_relation_takes_the_other_types_off_hop0(self, science_graph):
         # The fixture schema describes DEVELOPED as "developed an idea", so
-        # "developed" names it and nothing else.
-        model = ScriptedModel(choices=["list", "DEVELOPED:out", "stop"])
+        # "developed" names it and nothing else. Over the whole graph the
+        # direction is the convention's, so nothing is left to ask.
+        model = ScriptedModel(choices=["list", "stop"])
         result = _plan(science_graph, model, "Who developed something?", [])
         assert result.plan.hops == [Hop("DEVELOPED", "out")]
-        assert not any(k.startswith("any:") for k in model.choice_calls[1])
+        assert next(t for t in result.trace if t.step == "hop0").forced
 
-    def test_a_named_relation_leaves_the_direction_to_the_model(self, science_graph):
-        model = ScriptedModel(choices=["list", "DEVELOPED:in"])
-        result = _plan(science_graph, model, "Who developed something?", [])
-        assert result.plan.hops == [Hop("DEVELOPED", "in")]
-        assert set(model.choice_calls[1]) == {"DEVELOPED:out", "DEVELOPED:in"}
+    def test_an_anchored_hop_still_chooses_its_direction(self, science_graph):
+        # The convention holds only over the whole graph: from an entity, the
+        # two directions reach different entities.
+        model = ScriptedModel(choices=["list", "DISCOVERED:in", "stop"])
+        result = _plan(science_graph, model, "General Relativity neye bağlı?",
+                       ["General Relativity"])
+        assert result.plan.hops == [Hop("DISCOVERED", "in")]
+        assert {"any:out", "DISCOVERED:in"} <= set(model.choice_calls[1])
 
     def test_only_hop0_is_restricted(self, science_graph):
-        model = ScriptedModel(choices=["list", "DEVELOPED:out", "any:in"])
+        model = ScriptedModel(choices=["list", "any:in"])
         result = _plan(science_graph, model, "Who developed something?", [], max_hops=2)
         assert result.plan.hops == [Hop("DEVELOPED", "out"), Hop(None, "in")]
-        assert any(k.startswith("any:") for k in model.choice_calls[2])
+        assert any(k.startswith("any:") for k in model.choice_calls[1])
+
+    def test_the_question_can_name_the_other_direction(self, science_graph):
+        # "incoming" says the answer is at the end the relations arrive at.
+        model = ScriptedModel(choices=["any:in", "stop"])
+        result = _plan(science_graph, model, "Which entities have at least 2 incoming relations?", [])
+        assert result.plan.hops == [Hop(None, "in")]
+        assert all(k.endswith(":in") for k in model.choice_calls[0])
 
     def test_a_relation_named_by_its_object_is_not_named(self, science_graph):
         # "an idea" is what DEVELOPED acts on, not what it is called.
@@ -269,15 +291,14 @@ class TestHopLoop:
         assert candidates.names_one_relation("Newton ne yazar?", schema, words) is None
 
     def test_a_schema_word_reaches_hop0(self, science_graph):
-        model = ScriptedModel(choices=["list", "DEVELOPED:in"])
+        model = ScriptedModel(choices=["list", "stop"])
         result = _plan(science_graph, model, "Calculus'u kim geliştirdi?", [],
                        relation_words={"DEVELOPED": ("geliştir",)})
-        assert result.plan.hops == [Hop("DEVELOPED", "in")]
-        assert set(model.choice_calls[1]) == {"DEVELOPED:out", "DEVELOPED:in"}
+        assert result.plan.hops == [Hop("DEVELOPED", "out")]
 
     def test_a_schema_word_counts_as_mentioning_a_relation(self, science_graph):
         # Without it the question names no relation at all and stops at hop0.
-        model = ScriptedModel(choices=["count", "DEVELOPED:out", "stop"])
+        model = ScriptedModel(choices=["count", "stop"])
         result = _plan(science_graph, model, "Kaç şey geliştirilmiş?", [],
                        relation_words={"DEVELOPED": ("geliştir",)})
         assert result.plan.hops == [Hop("DEVELOPED", "out")]
@@ -377,7 +398,7 @@ class TestHopLoop:
 
 class TestFiltersAndShape:
     def test_numeric_filter_uses_numbers_from_question(self, science_graph):
-        model = ScriptedModel(choices=["group", "any:out", "stop", "v1.pagerank", ">", "count"],
+        model = ScriptedModel(choices=["group", "any:out", "stop", "v1", ">", "count"],
                               nouls=[0.9])
         result = _plan(science_graph, model, "PageRank'ı 0,1'den büyük hedeflere giden kenarlar, tipe göre", [])
         assert result.plan.filters == [Filter(FieldRef("v1", "pagerank"), ">", 0.1)]
@@ -386,7 +407,23 @@ class TestFiltersAndShape:
         model = ScriptedModel(choices=["count", "DEVELOPED:in"])
         result = _plan(science_graph, model, "Calculus'u kaç kişi geliştirdi?", ["Calculus"])
         assert result.plan.filters == []
-        assert not any(t.step.startswith("filter") for t in result.trace)
+        # The step still appears in the trace, but it costs nothing: with no
+        # number and no field named, the answer is not the model's to give.
+        assert all(t.forced for t in result.trace if t.step.startswith("filter"))
+
+    def test_a_number_without_a_field_is_not_a_filter(self, science_graph):
+        # "1'den fazla" compares the size of a group with a number; no node
+        # carries a value the question could mean.
+        model = ScriptedModel(choices=["any:out", "stop"])
+        result = _plan(science_graph, model, "Graph'ta 1'den fazla geçen ilişki türleri hangileri?", [])
+        assert result.plan.filters == []
+
+    def test_a_ranking_spends_its_number_on_the_top_k(self, science_graph):
+        # The question names PageRank, but its number is the top-k.
+        model = ScriptedModel(choices=["rank", "max:v0.pagerank"], nouls=[0.1])
+        result = _plan(science_graph, model, "PageRank'ı en yüksek 3 varlık hangisi?", [])
+        assert result.plan.filters == []
+        assert result.plan.limit == 3
 
     def test_rank_uses_small_number_as_limit(self, science_graph):
         model = ScriptedModel(choices=["rank", "any:out", "stop"], nouls=[0.1])

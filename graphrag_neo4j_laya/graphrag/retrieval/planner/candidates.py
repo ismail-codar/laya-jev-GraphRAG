@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 
 from .describe import describe_hops
-from .plan import NODE_FIELDS, Hop, QueryPlan
+from .plan import Hop, QueryPlan
 
 # "0,1" (Turkish decimal comma) and "0.1" both mean 0.1; "1,000"-style
 # thousands separators are not expected in questions.
@@ -127,6 +127,19 @@ def relation_object_words(description: str) -> frozenset[str]:
         if word in _OBJECT_WORDS:
             return frozenset(w for w in words[i + 1:] if w not in _FUNCTION_WORDS)
     return frozenset()
+
+
+# A question can name what it wants without naming a kind: "everything",
+# "all entities", "tüm varlıklar". Then a kind it also names belongs to
+# something else in the sentence — the entity in the middle of the path.
+_ANYTHING_RE = re.compile(
+    r"(?<!\w)(everything|anything|entit(y|ies)|things?|"
+    r"varlık\w*|şey\w*)(?!\w)", re.IGNORECASE)
+
+
+def asks_for_anything(text: str) -> bool:
+    """Does the question say its answer is any entity, of whatever kind?"""
+    return bool(_ANYTHING_RE.search(text))
 
 
 def kinds_named(text: str, predicate_words: dict[str, tuple[str, ...]]) -> list[str]:
@@ -256,10 +269,33 @@ def the_way_back(hop: Hop) -> str:
     return f"{hop.rel_type or 'any'}:{'in' if hop.direction == 'out' else 'out'}"
 
 
+# Over the whole graph a relation can be walked either way and the edges are
+# the same either way: only which end is called v0 changes. The convention is
+# that v0 is the end the relation leaves from — "hangi ilişki tiplerini
+# kullanıyor", "en çok **giden** ilişkisi olan" — unless the question says the
+# answer is at the other end.
+_DIRECTION_WORDS = (
+    ("in", re.compile(r"(?<!\w)(incoming|inbound|inward|gelen|alan)(?!\w)", re.IGNORECASE)),
+    ("out", re.compile(r"(?<!\w)(outgoing|outbound|outward|giden|çıkan)(?!\w)", re.IGNORECASE)),
+)
+
+
+def direction_named(text: str) -> str | None:
+    """The direction the question names for a hop out of the whole graph."""
+    for direction, pattern in _DIRECTION_WORDS:
+        if pattern.search(text):
+            return direction
+    return None
+
+
+def only_this_direction(options: dict[str, str], direction: str) -> dict[str, str]:
+    """The hop options walking *direction* alone; empty where there are none."""
+    return {key: text for key, text in options.items() if key.split(":")[1] == direction}
+
+
 def only_this_relation(options: dict[str, str], rel_type: str) -> dict[str, str]:
-    """The hop options of *rel_type* alone, or all of them if it has none here."""
-    kept = {key: text for key, text in options.items() if key.split(":")[0] == rel_type}
-    return kept or options
+    """The hop options of *rel_type* alone; empty where the graph offers none."""
+    return {key: text for key, text in options.items() if key.split(":")[0] == rel_type}
 
 
 def mentions_entity(text: str, name: str) -> bool:
@@ -352,6 +388,19 @@ def asks_about_importance(text: str) -> bool:
     return bool(_IMPORTANCE_RE.search(text))
 
 
+# The only numbers a node carries are its PageRank and the community it was
+# put in, so a filter on a node's own number is a question about one of them.
+_NUMERIC_FIELD_WORDS = (("pagerank", _IMPORTANCE_RE), ("communityId", _FIELD_WORDS[1][1]))
+
+
+def numeric_field_named(text: str) -> str | None:
+    """The numeric node field the question compares with a number, if it names one."""
+    for field, pattern in _NUMERIC_FIELD_WORDS:
+        if pattern.search(text):
+            return field
+    return None
+
+
 def node_vars(plan: QueryPlan) -> list[str]:
     return [f"v{i}" for i in range(len(plan.hops) + 1)]
 
@@ -365,10 +414,6 @@ def group_key_candidates(plan: QueryPlan) -> list[tuple[str, str]]:
     keys = [(v, f) for v in node_vars(plan) for f in ("name", "communityId")]
     keys += [(e, "type") for e in edge_vars(plan)]
     return keys
-
-
-def numeric_field_candidates(plan: QueryPlan) -> list[tuple[str, str]]:
-    return [(v, f) for v in node_vars(plan) for f in NODE_FIELDS if f != "name"]
 
 
 _DISTINCT_RE = re.compile(r"(?<!\w)(distinct|different|unique|farklı|ayrı|değişik)(?!\w)",
