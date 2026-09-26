@@ -31,6 +31,20 @@ PREDICATE_KINDS = {
     "organisation": "an organisation, institution or society",
     "phenomenon":   "a natural phenomenon",
 }
+# The words a question uses to name each kind. The descriptions above are
+# English and the questions need not be, and unlike the relation schema the
+# predicates are a fixed list, so the words live here. A word matches a
+# question word that starts with it ("eser" covers "eserleri").
+PREDICATE_WORDS = {
+    "person":       ("person", "people", "scientist", "kişi", "insan", "bilimci"),
+    "theory":       ("theory", "theories", "law", "idea", "teori", "kuram", "yasa", "fikir"),
+    "place":        ("place", "city", "cities", "village", "country", "countries",
+                     "yer", "şehir", "kent", "ülke", "köy"),
+    "work":         ("work", "book", "paper", "publication", "eser", "kitap", "makale", "yapıt"),
+    "organisation": ("organisation", "organization", "institution", "society",
+                     "kurum", "kuruluş", "örgüt", "cemiyet"),
+    "phenomenon":   ("phenomenon", "phenomena", "olay", "olgu"),
+}
 PREDICATE_INSTRUCTION = "Does the question only ask about entities of one kind? If so, which kind?"
 SURE_THRESHOLD = 0.70
 REJECT_THRESHOLD = 0.30

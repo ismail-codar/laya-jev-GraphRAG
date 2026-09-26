@@ -296,7 +296,30 @@ class _Planning:
             self.plan.having.append(Having(metric, op, self._number("having_value", numbers)))
 
     def semantic_step(self) -> None:
-        kind = self.choose("semantic", semantic_filter.PREDICATE_INSTRUCTION, semantic_filter.PREDICATE_KINDS)
+        # The filter keeps only entities of one kind, so it is worth asking
+        # about only for a kind the question actually names — and not for one
+        # a hop already guarantees: every BORN_IN target is a place, so "how
+        # many places was he born in" needs no filter on top, and a kind that
+        # names an entity in the middle of the path ("the work he wrote, and
+        # the concepts it relates to") is not a restriction on the answer
+        # either. Measured: offered all seven kinds, the step put one on four
+        # questions that ask for none and left it off two that need one.
+        words = semantic_filter.PREDICATE_WORDS
+        implied = {candidates.kind_implied_by(hop.rel_type, self.p.relation_schema, words)
+                   for hop in self.plan.hops}
+        named = [kind for kind in candidates.kinds_named(self.question, words)
+                 if kind not in implied]
+        if not named:
+            self.forced("semantic", semantic_filter.NO_PREDICATE)
+            return
+        if not self.plan.hops and len(named) == 1:
+            # A plan over the whole graph that walks nowhere returns every
+            # entity, so the kind is the only thing the question restricts.
+            self.semantic = self.forced("semantic", named[0])
+            return
+        options = {k: v for k, v in semantic_filter.PREDICATE_KINDS.items()
+                   if k == semantic_filter.NO_PREDICATE or k in named}
+        kind = self.choose("semantic", semantic_filter.PREDICATE_INSTRUCTION, options)
         if kind != semantic_filter.NO_PREDICATE:
             self.semantic = kind
 

@@ -120,6 +120,39 @@ def relation_words_of(description: str) -> frozenset[str]:
     return frozenset(words)
 
 
+def relation_object_words(description: str) -> frozenset[str]:
+    """The words of *description* that name what the relation acts on."""
+    words = re.findall(r"[a-z]+", description.lower())
+    for i, word in enumerate(words):
+        if word in _OBJECT_WORDS:
+            return frozenset(w for w in words[i + 1:] if w not in _FUNCTION_WORDS)
+    return frozenset()
+
+
+def kinds_named(text: str, predicate_words: dict[str, tuple[str, ...]]) -> list[str]:
+    """Every predicate kind *text* names."""
+    said = {w.lower() for w in re.findall(r"[^\W\d_]+", text, re.UNICODE)}
+    return [kind for kind, words in predicate_words.items()
+            if any(w.startswith(word) for word in words for w in said)]
+
+
+def kind_implied_by(rel_type: str | None, relation_schema: dict[str, str],
+                    predicate_words: dict[str, tuple[str, ...]]) -> str | None:
+    """
+    The kind a hop of *rel_type* already restricts its target to.
+
+    "was born in a place" says every BORN_IN target is a place, so a question
+    asking how many places someone was born in needs no filter on top.
+    """
+    if rel_type is None:
+        return None
+    objects = relation_object_words(relation_schema.get(rel_type, ""))
+    for kind, words in predicate_words.items():
+        if any(w.startswith(word) for word in words for w in objects):
+            return kind
+    return None
+
+
 def named_relations(
     text: str,
     relation_schema: dict[str, str],
