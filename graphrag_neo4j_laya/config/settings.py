@@ -136,8 +136,8 @@ class Settings(BaseSettings):
 
     # ── Guided query planner (aggregate route) ───────────────────────────────
     aggregate_route_enabled: bool = Field(
-        False,
-        description="Offer the 'aggregate' intent to the router and run the guided planner",
+        True,
+        description="Take the 'aggregate' route when the question asks to count, list, rank or group",
     )
     aggregate_route_min_confidence: float = Field(
         0.5, ge=0.0, le=1.0,

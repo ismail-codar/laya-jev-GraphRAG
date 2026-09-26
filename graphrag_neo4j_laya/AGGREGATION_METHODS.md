@@ -718,7 +718,7 @@ Tüm düğümleri taramak ölçeklenmez. Büyük graph'ta adaylar önce daraltı
 
 ## 7. Yöntem 6: Rehberli sorgu planlayıcı
 
-> Durum: implement edildi (`graphrag/retrieval/planner/`), router rotası `AGGREGATE_ROUTE_ENABLED` bayrağıyla **kapalı** — üç bayrak hedefi de artık tutuyor, yani bayrağı açmanın önünde ölçülmüş bir engel kalmadı; açma kararı verilmedi. Plan: `docs/plans/2026-09-25-001-feat-guided-query-planner-plan.md`.
+> Durum: implement edildi (`graphrag/retrieval/planner/`) ve router rotası **açık** (`AGGREGATE_ROUTE_ENABLED`, varsayılan `true`) — üç bayrak hedefi de tutuyor: sonuç eşleşmesi %100, yanlış yönlendirme %0, hop yönü %100. Ölçüm tek bir küçük graph üzerinde; bayrak kapatılabilir. Plan: `docs/plans/2026-09-25-001-feat-guided-query-planner-plan.md`.
 
 ### Ne yapar
 
@@ -938,8 +938,8 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
   atlanabilir — ama bunu ölçecek yanlış plan kalmadığı için denenmedi.
 - **`global` rotası**: kalan üç yönlendirme hatasının üçü de orada ve model dört ifadenin
   hiçbirinde bu rotayı seçmedi. Önce daha çok `global` sorusu etiketlemek gerekiyor.
-- **Bayrağı açmak**: üç hedef de tuttuğuna göre `AGGREGATE_ROUTE_ENABLED` açılabilir; karar
-  verilmedi, ölçüm hâlâ tek bir küçük graph üzerinde.
+- **Bayrak açıldı** (2026-09-26). Rota artık varsayılan olarak alınıyor; ölçüm hâlâ tek bir
+  küçük graph üzerinde, başka bir graph'ta önce aynı düzenekle ölçün.
 - Metrik adımı: `collect` ile sayım arasındaki seçim iki soruda da yanlış tarafa düştü.
 - Aynı düzenekle Jev backend'ini ölçmek (`DECISION_MODEL_BACKEND=jev`).
 

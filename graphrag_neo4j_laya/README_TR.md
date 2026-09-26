@@ -448,13 +448,13 @@ print(f"Δ:    {result['delta']:.4f}")
 
 #### 6. Agregasyon soruları (deneysel rehberli sorgu planlayıcı)
 
-"Kaç tane", "en çok hangisi" ya da "hepsini listele" gibi sorularda sayımı LLM değil veritabanı yapmalıdır. Rehberli sorgu planlayıcı tipli bir sorgu planını adım adım kurar: yasal hamleleri kod üretir (mevcut sınırda gerçekten var olan ilişki tipleri ve yönler, beyaz listedeki alanlar ve operatörler), Laya yalnızca bunlar arasından seçer. Plan parametreli Kùzu Cypher'a çevrilir, bir kez `Noul` ile soruya karşı kontrol edilir ve çalıştırılır. Ayrıntılar ve ölçümler: [AGGREGATION_METHODS.md](AGGREGATION_METHODS.md), Yöntem 6.
+"Kaç tane", "en çok hangisi" ya da "hepsini listele" gibi sorularda sayımı LLM değil veritabanı yapmalıdır. Rehberli sorgu planlayıcı tipli bir sorgu planını adım adım kurar: yasal hamleleri kod üretir (mevcut sınırda gerçekten var olan ilişki tipleri ve yönler, beyaz listedeki alanlar ve operatörler), Laya yalnızca bunlar arasından seçer. Plan parametreli Kùzu Cypher'a çevrilir, soruya karşı geri okunur — plan ile bir alternatifi aynı `Noul` ile puanlanır, iyisi çalışır — ve çalıştırılır. Ayrıntılar ve ölçümler: [AGGREGATION_METHODS.md](AGGREGATION_METHODS.md), Yöntem 6.
 
-Yalnız Kùzu'da çalışır ve `DECISION_MODEL_BACKEND=ablation` ile kullanılamaz. Router rotası **varsayılan olarak kapalıdır**:
+Yalnız Kùzu'da çalışır ve `DECISION_MODEL_BACKEND=ablation` ile kullanılamaz. Soru bir sayı, bütün eşleşmeler, bir sıralama ya da kategori başına bir döküm istiyorsa bu rota alınır — bunu model seçmez, sorunun sözcüklerinden okunur. Rota **varsayılan olarak açıktır**:
 
 ```bash
 # .env
-AGGREGATE_ROUTE_ENABLED=true      # router'a `aggregate` niyetini sun
+AGGREGATE_ROUTE_ENABLED=false     # rotayı kapat, router'a üç stratejisi kalsın
 AGGREGATE_ANSWER_MODE=template    # 'template' (LLM yok, varsayılan) ya da 'llm' (fact + citation kontrolü)
 RELATION_SCHEMA_PATH=examples/data/science_history.json   # planlayıcı için ilişki açıklamaları
 ```

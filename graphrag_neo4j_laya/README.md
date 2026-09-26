@@ -446,18 +446,18 @@ print(f"Δ:    {result['delta']:.4f}")
 
 #### 6. Aggregate questions (experimental guided query planner)
 
-Questions like "how many", "which has the most" or "list every" need the database to count, not the LLM. The guided query planner builds a typed query plan step by step: code enumerates the legal moves from the live graph (relation types and directions that exist on the current frontier, whitelisted fields and operators), and Laya only picks among them. The plan is rendered to parameterised Kùzu Cypher, checked against the question once with Noul, and executed. Details and measurements: [AGGREGATION_METHODS.md](AGGREGATION_METHODS.md), method 6.
+Questions like "how many", "which has the most" or "list every" need the database to count, not the LLM. The guided query planner builds a typed query plan step by step: code enumerates the legal moves from the live graph (relation types and directions that exist on the current frontier, whitelisted fields and operators), and Laya only picks among them. The plan is rendered to parameterised Kùzu Cypher, read back against the question — the plan and its runner-up are scored with the same Noul and the better one runs — and executed. Details and measurements: [AGGREGATION_METHODS.md](AGGREGATION_METHODS.md), method 6.
 
-Kùzu only, and not available with `DECISION_MODEL_BACKEND=ablation`. The router route is **off by default**:
+Kùzu only, and not available with `DECISION_MODEL_BACKEND=ablation`. The router takes this route when the question asks for a number, for every match, for a ranking or for a breakdown — which is read from its words, not chosen by the model. It is **on by default**:
 
 ```bash
 # .env
-AGGREGATE_ROUTE_ENABLED=true      # offer the `aggregate` intent to the router
+AGGREGATE_ROUTE_ENABLED=false     # turn the route off and leave the router its three strategies
 AGGREGATE_ANSWER_MODE=template    # 'template' (no LLM, default) or 'llm' (facts + citation check)
 RELATION_SCHEMA_PATH=examples/data/science_history.json   # relation descriptions for the planner
 ```
 
-Without the flag, call the planner directly. It bypasses the router and returns the plan, the Cypher, the rows and the step trace, or `None` when no plan was accepted:
+With the flag off, call the planner directly. It bypasses the router and returns the plan, the Cypher, the rows and the step trace, or `None` when no plan was accepted:
 
 ```python
 result = pipeline.query_aggregate("How many places was Isaac Newton born in?")
