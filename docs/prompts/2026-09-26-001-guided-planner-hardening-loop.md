@@ -125,6 +125,7 @@ Kronolojik; her satır bir commit. Ölçümler gerçek Laya, aynı 34 soru.
 | 11 | Anılan ilişki tipi, onu sunabilen ilk hop'ta harcanır (yalnız hop0'da değil) | hop tipi → **%100**, durma → **%100**, filtre → **%100**, sonuç → **%95,8** |
 | 12 | Soru cevabını adlandırmışsa ("everything", "varlık") andığı tür cevaba ait değil | anlamsal → **%100**, **sonuç %100**, tam plan **%95,8** |
 | 13 | Bütün graph'tan atılan ilk hop `out` (soru "incoming/gelen" demedikçe) | yön → **%100**, **tam plan %100** — her adım 24 / 24 |
+| 14 | Geri okuma eşik değil karşılaştırma: plan ile onarım adayı puanlanır, iyisi çalışır | doğru planı koruma %50 → **%79,2**, yanlış planı yenme %66,7 → **%79,2** |
 
 ### Çürütülen varsayımlar — tekrar denemeyin
 
@@ -135,6 +136,10 @@ Kronolojik; her satır bir commit. Ölçümler gerçek Laya, aynı 34 soru.
   %37,5 → %12,5) ve plan süresi 0,95 → 5,26 sn'ye çıktı. **Geri alındı.**
 - **`ask_batch` ile çoklu seçim ayırt etmiyor.** Gruplama anahtarlarında doğru aday da yanlışı da
   0,75–0,96 arasında; argmax 7'de 3. Planlayıcı artık `ask_batch`'i hiç çağırmıyor.
+- **Mutlak bir olasılığı eşikle okumak (geri çeviri kontrolü).** Puan planı değil soruyu
+  izliyor; altı ifadenin en iyisi bile en iyi eşikte %66,7 doğrulukta. İki uzun açıklamayı tek
+  `Choice`'ta karşılaştırmak da şans seviyesinde (%47,9) ve konum yanlı (ilk seçenek %70,8'e
+  karşı %25). Çalışan okuma: iki ayrı `Noul` puanını karşılaştırmak.
 - **Metrik `Choice`'ı bir tercihe saplanıyor.** PageRank seçenekleri açıkken onları, kapalıyken
   altı grubun altısına da `count_distinct` seçti.
 - **Geri dönüş kuralını kayıtsız şartsız koymak.** AE3'ü kırar; istisna ifadeden okunmalı.
@@ -161,9 +166,9 @@ Kronolojik; her satır bir commit. Ölçümler gerçek Laya, aynı 34 soru.
    gücü bile hesaplanamıyor. Devam etmek için **yeni sorular** gerekiyor — üç ve daha fazla hop,
    birden çok anahtar, birden çok tür, sayısal alan filtresi, `in` yönünde bütün-graph sorusu.
    Yeni soru eklerken altın planları elle yazın ve önce mevcut planlayıcıyla ölçün.
-2. **Geri çeviri kontrolü** — artık en zayıf halka: doğru planların yarısını reddediyor (%50),
-   yanlışların üçte birini geçiriyor. Her adım doğruyken kontrolün planı `None`'a çevirmesi net
-   kayıp.
+2. **Geri okumanın maliyeti** — her soruda bir plan kurma + bir `Noul` daha. Marjı büyük
+   planlarda (model kararsız değilken) atlanabilir; ölçecek yanlış plan kalmadığı için
+   denenmedi.
 3. **Router** — tutmayan tek bayrak hedefi burada: agregasyon sorularının yalnız %37,5'i bu
    rotaya giriyor, yanlış yönlendirme %10. Planlayıcı artık doğru plan kuruyor; darboğaz
    yönlendirme.

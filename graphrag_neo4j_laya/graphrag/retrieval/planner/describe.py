@@ -49,14 +49,15 @@ def describe_start(plan: QueryPlan) -> str:
     return f"Start at the entity '{plan.start}'" if plan.start else "Start from every entity"
 
 
-def describe_hops(plan: QueryPlan, relation_schema: dict[str, str]) -> list[str]:
+def describe_hops(plan: QueryPlan, relation_schema: dict[str, str],
+                  glosses: bool = True) -> list[str]:
     parts = []
     for hop in plan.hops:
         if hop.rel_type is None:
             rel = "any relation"
         else:
             desc = relation_schema.get(hop.rel_type)
-            rel = f"a {hop.rel_type} relation" + (f" ({desc})" if desc else "")
+            rel = f"a {hop.rel_type} relation" + (f" ({desc})" if desc and glosses else "")
         if hop.direction == "out":
             parts.append(f"step to entities it has {rel} to")
         else:
@@ -71,12 +72,12 @@ def describe_filters(plan: QueryPlan) -> list[str]:
     ]
 
 
-def describe_result(plan: QueryPlan) -> str:
-    target = _var(plan.target)
+def describe_result(plan: QueryPlan, glosses: bool = True) -> str:
+    target = f" ({_var(plan.target)})" if glosses else ""
     if plan.operation == "count":
-        return f"count the distinct entities reached ({target})"
+        return f"count the distinct entities reached{target}"
     if plan.operation == "list":
-        return f"list the distinct entities reached ({target})"
+        return f"list the distinct entities reached{target}"
     keys = ", ".join(_ref(k) for k in plan.keys) or "nothing"
     metrics = ", ".join(_metric(m) for m in plan.metrics) or "nothing"
     verb = "rank by" if plan.operation == "rank" else "compute"
@@ -86,9 +87,17 @@ def describe_result(plan: QueryPlan) -> str:
     return text
 
 
-def describe_plan(plan: QueryPlan, relation_schema: dict[str, str] | None = None) -> str:
+def describe_plan(plan: QueryPlan, relation_schema: dict[str, str] | None = None,
+                  glosses: bool = True) -> str:
+    """
+    The plan in English. Glosses are the parentheses that spell out what the
+    plan means internally — what a relation type is described as in the
+    schema, which variable of the path the answer is. They help the planner's
+    own steps, and they measurably hurt the check that reads the finished
+    plan against the question, which is asked without them.
+    """
     parts = [describe_start(plan)]
-    parts += describe_hops(plan, relation_schema or {})
+    parts += describe_hops(plan, relation_schema or {}, glosses)
     parts += describe_filters(plan)
-    parts.append(describe_result(plan))
+    parts.append(describe_result(plan, glosses))
     return ", then ".join(parts) + "."

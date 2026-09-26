@@ -101,8 +101,10 @@ def parse_plan(spec: dict[str, Any], row_limit: int = 200) -> QueryPlan:
 
 def describe_spec(spec: dict[str, Any], relation_schema: dict[str, str] | None = None) -> str:
     """The description the planner would give this spec, predicate included."""
-    text = describe_plan(parse_plan(spec), relation_schema or {})
-    return f"{text} ({describe_predicate(spec['semantic'])})" if spec.get("semantic") else text
+    text = describe_plan(parse_plan(spec), relation_schema or {}, glosses=False)
+    if not spec.get("semantic"):
+        return text
+    return f"{text[:-1]}, then {describe_predicate(spec['semantic'])}."
 
 
 def validate_item(item: dict[str, Any]) -> None:
@@ -323,7 +325,7 @@ def _mean(values: list[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
 
-def summarise(records: list[dict[str, Any]], check_threshold: float = 0.5) -> dict[str, Any]:
+def summarise(records: list[dict[str, Any]]) -> dict[str, Any]:
     agg = [r for r in records if r["intent"] == "aggregate"]
     non_agg = [r for r in records if r["intent"] != "aggregate"]
     planned = [r for r in agg if r["confidence_min"] is not None]
@@ -338,10 +340,12 @@ def summarise(records: list[dict[str, Any]], check_threshold: float = 0.5) -> di
         "misrouting_rate": _rate([r["misrouted"] for r in non_agg]),
         "route_accuracy": _rate([r["route_correct"] for r in records]),
         "by_lang": {},
+        # The check reads two plans back against the question and keeps the
+        # better one, so what it has to get right is the comparison: the
+        # right plan is kept when it scores at least as high as the wrong one.
         "check": {
-            "threshold": check_threshold,
-            "gold_pass_rate": _rate([r["check_gold"] >= check_threshold for r in agg]),
-            "wrong_reject_rate": _rate([r["check_wrong"] < check_threshold for r in agg]),
+            "keeps_gold_rate": _rate([r["check_gold"] >= r["check_wrong"] for r in agg]),
+            "beats_wrong_rate": _rate([r["check_gold"] > r["check_wrong"] for r in agg]),
         },
         "confidence_separation": {
             "min": separation([r["confidence_min"] for r in planned], labels),
@@ -403,8 +407,8 @@ def format_report(summary: dict[str, Any]) -> str:
     check = summary["check"]
     sep = summary["confidence_separation"]
     lines += [
-        f"Check (threshold {check['threshold']:.2f}): gold pass {pct(check['gold_pass_rate'])}  "
-        f"wrong reject {pct(check['wrong_reject_rate'])}",
+        f"Check (read back, better of two): right plan kept {pct(check['keeps_gold_rate'])}  "
+        f"wrong plan beaten {pct(check['beats_wrong_rate'])}",
         f"Confidence separation: min {pct(sep['min'])}  product {pct(sep['product'])}",
         f"Latency: route {summary['latency_ms']['route_mean']:.0f} ms  "
         f"plan {(summary['latency_ms']['plan_mean'] or 0):.0f} ms (mean)",
@@ -455,7 +459,7 @@ def run_live(data_path: Path = DEFAULT_DATA) -> tuple[list[dict[str, Any]], floa
             )
         finally:
             db.close()
-    return records, settings.aggregate_check_min_confidence
+    return records
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -467,8 +471,8 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format="%(levelname)s %(name)s: %(message)s")
 
-    records, check_threshold = run_live(args.data)
-    summary = summarise(records, check_threshold)
+    records = run_live(args.data)
+    summary = summarise(records)
     print(format_report(summary))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps({"summary": summary, "records": records}, indent=2, ensure_ascii=False),

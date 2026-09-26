@@ -837,7 +837,7 @@ Yöntem 1–3'teki sabit şablonlar yerine sorguyu **adım adım** kurar. Her ad
    ≤ 0,30 hayır) ve kesin küme `IN` filtresi olarak plana eklenir. Sonuç `[kesin, kesin +
    belirsiz]` aralığıdır.
 
-Sonra plan (tipli bir AST, `plan.py`) parametreli Kùzu Cypher'a çevrilir. Tanımlayıcılar beyaz listeden gelir, bütün değerler parametredir. Planın İngilizce açıklaması soruya karşı bir kez `Noul` ile kontrol edilir ("Bu sorgu soruyu cevaplıyor mu?"). Kontrol geçmezse en küçük marjlı adım ikinci seçenekle değiştirilip plan bir kez daha kurulur. Plan güveni en zayıf adımın olasılığıdır. Güven düşükse ya da kontrol geçmezse `None` döner ve pipeline eski rotalara düşer.
+Sonra plan (tipli bir AST, `plan.py`) parametreli Kùzu Cypher'a çevrilir. Tanımlayıcılar beyaz listeden gelir, bütün değerler parametredir. Plan çalışmadan önce soruya karşı **geri okunur**: en küçük marjlı adım ikinci seçeneğine çevrilip plan bir kez daha kurulur ve iki açıklama aynı `Noul` ile puanlanır ("Bu sorgu sorunun istediği şeyi mi döndürüyor?"); yüksek puanlı olan çalışır, eşitlikte planlayıcının kurduğu kalır. Puan bir not değil, bir karşılaştırmadır: ölçümde mutlak seviyesi planı değil soruyu izliyor, o yüzden sabit eşik doğru planların yarısını reddediyordu. Geri okuma açıklamanın parantezsiz hâliyle yapılır — ilişki tipinin şemadaki açıklaması ve cevabın yolun kaçıncı varlığı olduğu planlayıcının kendi adımlarına yarıyor, geri okumaya zarar veriyor. Planı hâlâ reddedebilen tek şey kendi güveni (en zayıf adımın olasılığı); düşükse `None` döner ve pipeline eski rotalara düşer.
 
 Bu, Pangu'nun (Gu ve ark., 2023) "üretme, ayırt et" ilkesidir: model sorgu yazmaz, kodun sıraladığı adaylar arasından seçer.
 
@@ -874,7 +874,7 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 | Sonuç eşleşmesi | %100 (24 / 24 — değişmedi) | ≥ %80 **✓** |
 | Agregasyon sorusunu `aggregate`'e yönlendirme | %37,5 (değişmedi) | |
 | Yanlış yönlendirme (agregasyon olmayan → `aggregate`) | %10 (1 / 10) | %0 |
-| Geri çeviri kontrolü: doğru planı geçirme / yanlış planı reddetme | %50,0 / %66,7 (değişmedi) | |
+| Geri okuma: doğru planı koruma / yanlış planı yenme | **%79,2 / %79,2** (eşikliyken %50,0 / %66,7) | |
 | Min ve çarpım güveninin ayırma gücü | ölçülemiyor — ayıracak yanlış plan kalmadı (önce %87,0) | |
 | Dil kırılımı (tam plan · sonuç) | en **%100 · %100** — tr **%100 · %100** | |
 | Gecikme (ortalama) | yönlendirme 0,31 sn · plan 0,73 sn | |
@@ -917,7 +917,8 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 - **Hop düzelince şekil adımı zorlaştı.** Anahtar %87,5 → %75,0, filtre %83,3 → %75,0: daha önce sıfır hop'ta kalan sorular artık bir hop attığı için gruplama anahtarı adayları çoğaldı ve model yanılıyor. Anlamsal filtre de %75,0 → %70,8 (`s06` artık gereksiz bir filtre ekliyor). Yine de tam plan %16,7 → %25,0 ve sonuç %20,8 → %25,0: artık sonuç isabetlerinin **altısı da** tam doğru plandan geliyor.
 - **KTD5 doğrulandı.** Doğru plan çıkmaya başlayınca güven ayırma gücü ilk kez ölçülebildi: en zayıf adım %87,3, adım olasılıklarının çarpımı %77,8; işlem adımından sonra %93,8'e karşı %83,8. Yani "plan güveni çarpım değil, en zayıf adımdır" kararı ölçümle destekleniyor.
 - **Hop adımını seçenek başına `Noul`'a çevirmek işe yaramadı (denendi, geri alındı).** Çok yönlü tek `Choice` yerine her hamle için ayrı bir evet/hayır cümlesi soruldu ("To answer the question, should the query take this step? Step to entities it has a BORN_IN relation (born in a place) to."), hepsi tek `ask_batch` çağrısında. Sonuç her yerde geriledi: hop tipi %37,5 → %12,5, yön %50,0 → %20,8, durma %54,2 → %20,8, filtre %83,3 → %54,2. Tam plan eşleşmesi 3 sorudan 0'a düştü, hiçbir soru kazanılmadı. Üstelik plan kurma süresi 0,95 sn'den 5,26 sn'ye çıktı: `ask_batch` bu Laya sürümünde tek forward pass gibi davranmıyor, maliyet seçenek sayısıyla artıyor (KTD6'nın dayandığı varsayım bu ölçümde tutmuyor). Not: bu tek bir ifadeyi ölçer, `Noul` fikrinin tamamını değil — ama gecikme maliyeti ifadeden bağımsız.
-- **Geri çeviri kontrolü zayıf bir ayırıcı.** Doğru planların yarısını reddediyor, yanlışların üçte birini geçiriyor. Onarım adımı bu yüzden az işe yarıyor.
+- **Geri çeviri kontrolü eşik olarak çalışmıyor, karşılaştırma olarak çalışıyor: %50,0 / %66,7 → %79,2 / %79,2.** Mutlak olasılığın planla ilgisi yoktu: aynı soruda altın plan ile yanlış plan birlikte iniyor çıkıyor (`s01` 0,047'ye karşı 0,032; `m03` 0,794'e karşı 0,764), yani puan soruyu ölçüyor. Altı ifade denendi; en iyisi bile 0,5 eşiğinde %50 doğru planı geçiriyor, en iyi eşikte doğruluk %66,7'de kalıyor. İki açıklamayı tek bir `Choice`'ta karşılaştırmak daha da kötü (%47,9) ve ağır konum yanlılığı taşıyor: ilk sıradaki seçenek %70,8'e karşı %25. İşe yarayan okuma göreli: aynı `Noul`'u iki plana ayrı ayrı sorup puanları karşılaştırmak. Kontrol artık bunu yapıyor — plan ile onarım adayı geri okunur, yüksek puanlı çalışır, eşitlikte plan kalır — ve eşik tamamen kalktı (`aggregate_check_min_confidence` ayarı silindi). İki küçük değişiklik daha ölçüldü: ifade "Does this query return exactly what the question asks for?" ve açıklamanın parantezli açıklamalarının atılması. Bedeli soru başına bir `Noul` ve bir plan kurma daha: karşılaştırma artık her soruda yapılıyor, eskiden yalnız eşik düştüğünde.
+- **Eşiksiz kalmanın bedeli açık:** kötü bir planı tek başına reddedecek bir şey kalmadı; geriye plan güveni (`aggregate_min_confidence`) kaldı. Ölçüm bunu haklı çıkarıyor — eşik, planlayıcı 24 / 24 doğruyken doğru planların yarısını çöpe atıyordu — ama yeni soru biçimlerinde yeniden bakılmalı.
 - **Filtre ve `HAVING` adımları görece iyi**, ama bu adımların çoğu soruda "yok" cevabı bekleniyor; yüksek oran kısmen bundan geliyor.
 - **`collect` ilk kez seçildi, ama iki soruda da yanlış.** İşlem adımı `g07`'de ("Her varlık hangi ilişki tiplerini kullanıyor?") artık `group` verdiği için metrik `Choice`'ı — dolayısıyla `collect` seçeneğini — ilk kez gördü. Laya `g07`'de yine de `count_distinct`'i seçti; `collect`'i seçtiği iki soruda (`g01`, `g05`) ise altın metrik sayım. Yani seçenek artık ulaşılabilir ve geçerli Cypher üretiyor, ama metrik adımı onu doğru yerde kullanmıyor.
 - **Gecikme ölçümler arasında 3–4 kat oynuyor** (plan 3,8 → 0,88 → 1,24 → 0,95 → 1,05 → 0,82 → 0,86 → 0,99 → 0,67 → 0,86 sn). Kod yolu aynı; fark ölçüm anındaki makine yüküne benziyor, ayrıca araştırılmadı. Mutlak değerden çok sıralama anlamlı: plan kurma yönlendirmenin ~5 katı.
@@ -928,8 +929,9 @@ Düzenek: `python -m graphrag.benchmarks.aggregate_planner_eval`. Soru seti `exa
 - **Yeni sorular**: etiketli set doydu (her adım 24 / 24), yani artık planlayıcıyı ölçmüyor.
   Sette hiç örneği olmayan biçimler: üç ve daha fazla hop, birden çok gruplama anahtarı, birden
   çok tür, sayısal alan filtresi, `in` yönünde bütün-graph sorusu.
-- **Geri çeviri kontrolü** artık en zayıf halka: doğru planların yarısını reddediyor (%50). Her
-  adım doğru karar verirken kontrolün planı `None`'a çevirmesi net kayıp.
+- **Geri okumayı ne zaman yapacağımız**: şimdi her soruda yapılıyor ve bir plan kurma + bir
+  `Noul` daha maliyeti var. En küçük marjın büyük olduğu planlarda (model kararsız değilken)
+  atlanabilir — ama bunu ölçecek yanlış plan kalmadığı için denenmedi.
 - Yönlendirme: `aggregate` recall %37,5 ve yanlış yönlendirme %10. Planlayıcı artık doğru planlar kuruyor, ama router soruların çoğunu bu rotaya hiç sokmuyor; tutmayan tek bayrak hedefi de burada.
 - Metrik adımı: `collect` ile sayım arasındaki seçim iki soruda da yanlış tarafa düştü.
 - Aynı düzenekle Jev backend'ini ölçmek (`DECISION_MODEL_BACKEND=jev`).

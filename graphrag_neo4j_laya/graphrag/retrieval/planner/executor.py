@@ -3,11 +3,15 @@ graphrag/retrieval/planner/executor.py
 
 Plan -> check -> (repair) -> execute -> facts.
 
-Before a plan touches the database its template description is checked
-against the question with one Noul call. If the check fails, the step with
-the smallest margin between its choice and the runner-up is switched to the
-runner-up and the plan is rebuilt and checked once more. Anything that does
-not pass returns None so the pipeline falls back to its existing routes.
+Before a plan touches the database it is read back against the question with
+one Noul call per candidate. The step with the smallest margin between its
+choice and the runner-up is switched to the runner-up, the plan is rebuilt,
+and the two are scored the same way: the better one runs, ties going to the
+plan the planner built. The score is a comparison, not a grade — measured on
+the labelled set, its level tracks the question and not the plan, so a fixed
+threshold rejected half the correct plans. What still declines a plan is its
+own confidence (the weakest step's probability), and then the pipeline falls
+back to its existing routes.
 
 A plan with a semantic filter runs in two phases (see semantic_filter.py):
 candidates are scored first, then the plan runs on the sure set and, when
@@ -31,7 +35,7 @@ from .render_kuzu import fetch, render
 
 logger = logging.getLogger(__name__)
 
-_CHECK_INSTRUCTION = "Does this database query answer the user's question?"
+_CHECK_INSTRUCTION = "Does this query return exactly what the question asks for?"
 
 
 @dataclass
@@ -65,15 +69,11 @@ class AggregateExecutor:
         db,
         planner: GuidedQueryPlanner,
         min_confidence: float | None = None,
-        check_threshold: float | None = None,
         max_candidates: int | None = None,
     ) -> None:
         self.db = db
         self.planner = planner
         self.min_confidence = settings.aggregate_min_confidence if min_confidence is None else min_confidence
-        self.check_threshold = (
-            settings.aggregate_check_min_confidence if check_threshold is None else check_threshold
-        )
         self.max_candidates = (
             settings.aggregate_semantic_max_candidates if max_candidates is None else max_candidates
         )
@@ -83,14 +83,14 @@ class AggregateExecutor:
         context = f"User question: {question}\nDatabase query: {description}"
         return get_decision_model().noul_detailed(context, _CHECK_INSTRUCTION).score
 
-    def _accepted(self, question: str, result: PlannerResult | None) -> tuple[bool, float]:
+    def _confident(self, result: PlannerResult | None) -> bool:
         if result is None:
-            return False, 0.0
+            return False
         if result.confidence < self.min_confidence:
-            logger.info("Plan confidence %.2f below %.2f — skipping", result.confidence, self.min_confidence)
-            return False, 0.0
-        p = self.check(question, result.description)
-        return p >= self.check_threshold, p
+            logger.info("Plan confidence %.2f below %.2f — skipping",
+                        result.confidence, self.min_confidence)
+            return False
+        return True
 
     def run(self, question: str, seeds: list[str]) -> AggregateResult | None:
         try:
@@ -101,18 +101,19 @@ class AggregateExecutor:
 
     def _run(self, question: str, seeds: list[str]) -> AggregateResult | None:
         result = self.planner.plan(question, seeds)
-        ok, p = self._accepted(question, result)
-        repaired = False
-        if not ok and result is not None and result.confidence >= self.min_confidence:
-            step = _repair_step(result.trace)
-            if step is None:
-                return None
-            logger.info("Plan check failed (%.2f); retrying with %s=%s", p, step.step, step.runner_up)
-            result = self.planner.plan(question, seeds, overrides={step.step: step.runner_up})
-            ok, p = self._accepted(question, result)
-            repaired = True
-        if not ok:
+        if not self._confident(result):
             return None
+        p = self.check(question, result.check_text)
+        repaired = False
+        step = _repair_step(result.trace)
+        if step is not None:
+            other = self.planner.plan(question, seeds, overrides={step.step: step.runner_up})
+            if self._confident(other):
+                q = self.check(question, other.check_text)
+                if q > p:
+                    logger.info("Read back better with %s=%s (%.2f over %.2f)",
+                                step.step, step.runner_up, q, p)
+                    result, p, repaired = other, q, True
 
         plan, split, upper_plan = result.plan, None, None
         if result.semantic:

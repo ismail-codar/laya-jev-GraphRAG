@@ -96,7 +96,7 @@ class TestHarness:
         assert summary["exact_plan_match"] == summary["result_match"] == 1.0
         assert summary["misrouting_rate"] == 0.0
         assert summary["aggregate_route_recall"] == 1.0
-        assert summary["check"] == {"threshold": 0.5, "gold_pass_rate": 1.0, "wrong_reject_rate": 1.0}
+        assert summary["check"] == {"keeps_gold_rate": 1.0, "beats_wrong_rate": 1.0}
         assert all(summary["targets"].values())
         assert set(summary["by_lang"]) == {"en", "tr"}
 

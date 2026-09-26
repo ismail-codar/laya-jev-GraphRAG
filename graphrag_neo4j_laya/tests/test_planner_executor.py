@@ -12,8 +12,8 @@ from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 from graphrag.retrieval.planner.executor import AggregateExecutor
-from graphrag.retrieval.planner.plan import FieldRef, Hop
-from graphrag.retrieval.planner.planner import GuidedQueryPlanner
+from graphrag.retrieval.planner.plan import FieldRef, Hop, QueryPlan
+from graphrag.retrieval.planner.planner import GuidedQueryPlanner, PlannerResult, StepTrace
 from tests.scripted_model import ScriptedModel
 
 AE1 = "Calculus'u kaç kişi geliştirdi?"
@@ -32,17 +32,11 @@ def _run(db, model, question, seeds, **kw):
 
 
 class TestCheckAndRepair:
-    def test_passing_check_executes_once(self, science_graph):
-        model = ScriptedModel(choices=["count", "DEVELOPED:in"], nouls=[0.9])
-        result = _run(science_graph, model, AE1, ["Calculus"])
-        assert result.rows == [{"count_distinct_v1_name": 1}]
-        assert result.repaired is False
-        assert model.noul_calls == 1
-
-    def test_failed_check_repairs_weakest_step(self, science_graph):
-        # hop0 is the least certain step (0.5); its runner-up DEVELOPED:in is tried.
-        # BORN_IN:in leads on, so hop1 is a Choice; DEVELOPED:in leads only
-        # back the way it came, so on the repaired run hop1 is forced.
+    def test_the_better_reading_wins(self, science_graph):
+        # hop0 is the least certain step (0.5); its runner-up DEVELOPED:in is
+        # tried and read back against the question. BORN_IN:in leads on, so
+        # hop1 is a Choice; DEVELOPED:in leads only back the way it came, so
+        # on the repaired run hop1 is forced.
         model = ScriptedModel(
             choices=["count", "BORN_IN:in", "stop", "none"] + ["count", "BORN_IN:in", "none"],
             probs=[0.9, 0.5, 0.9, 0.9] + [0.9, 0.5, 0.9],
@@ -53,10 +47,38 @@ class TestCheckAndRepair:
         assert result.plan.hops == [Hop("DEVELOPED", "in")]
         assert result.names == ["Gottfried Leibniz"]
 
-    def test_failed_repair_returns_none(self, science_graph):
-        model = ScriptedModel(choices=["count", "BORN_IN:in", "stop"] * 2,
-                              probs=[0.9, 0.5, 0.9] * 2, nouls=[0.2, 0.2])
-        assert _run(science_graph, model, AE1, ["Calculus"]) is None
+    def test_the_plan_is_kept_when_the_other_reading_is_no_better(self, science_graph):
+        model = ScriptedModel(
+            choices=["count", "BORN_IN:in", "stop", "none"] + ["count", "BORN_IN:in", "none"],
+            probs=[0.9, 0.5, 0.9, 0.9] + [0.9, 0.5, 0.9],
+            nouls=[0.9, 0.2],
+        )
+        result = _run(science_graph, model, AE1, ["Calculus"])
+        assert result.repaired is False
+        assert result.plan.hops == [Hop("BORN_IN", "in")]
+
+    def test_a_low_reading_alone_does_not_throw_the_plan_away(self, science_graph):
+        # Measured on the labelled set, the level of this probability tracks
+        # the question and not the plan, so it is never a reason to refuse.
+        model = ScriptedModel(choices=["count", "DEVELOPED:in"], nouls=[0.05, 0.02])
+        result = _run(science_graph, model, AE1, ["Calculus"])
+        assert result is not None and result.repaired is False
+        assert result.rows == [{"count_distinct_v1_name": 1}]
+
+    def test_a_plan_with_nothing_to_compare_is_read_back_once(self, science_graph):
+        # Every step was the code's, so there is no runner-up to read against.
+        plan = QueryPlan(operation="count", start="Calculus", hops=[Hop("DEVELOPED", "in")])
+        forced = [StepTrace("operation", ["count"], "count", 1.0, forced=True)]
+        planner = MagicMock()
+        planner.plan.return_value = PlannerResult(plan=plan, trace=forced, confidence=1.0,
+                                                  description="…", check_text="…")
+        planner.relation_schema = {}
+        model = ScriptedModel(nouls=[0.9])
+        with _model(model):
+            result = AggregateExecutor(science_graph, planner).run(AE1, ["Calculus"])
+        assert result.names == ["Gottfried Leibniz"]
+        assert model.noul_calls == 1
+        assert planner.plan.call_count == 1
 
     def test_low_confidence_plan_is_not_checked(self, science_graph):
         model = ScriptedModel(choices=["count", "DEVELOPED:in"], prob=0.2)

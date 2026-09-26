@@ -67,6 +67,8 @@ class PlannerResult:
     trace: list[StepTrace] = field(default_factory=list)
     confidence: float = 1.0
     description: str = ""
+    # The same plan without the glosses, for the check against the question.
+    check_text: str = ""
     # Entity kind the target must have (semantic_filter.PREDICATE_KINDS), or None.
     semantic: str | None = None
 
@@ -476,13 +478,17 @@ class GuidedQueryPlanner:
             return None
         # Overridden steps are a deliberate repair; the plan check vouches for them.
         description = describe_plan(state.plan, self.relation_schema)
+        check_text = describe_plan(state.plan, self.relation_schema, glosses=False)
         if state.semantic:
-            description += f" ({semantic_filter.describe_predicate(state.semantic)})"
+            predicate = semantic_filter.describe_predicate(state.semantic)
+            description += f" ({predicate})"
+            check_text = f"{check_text[:-1]}, then {predicate}."
         asked = [t.probability for t in state.trace if not t.forced and not t.overridden]
         return PlannerResult(
             plan=state.plan,
             trace=state.trace,
             confidence=min(asked) if asked else 1.0,
             description=description,
+            check_text=check_text,
             semantic=state.semantic,
         )
